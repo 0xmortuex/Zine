@@ -63,6 +63,30 @@ src/
 scripts/      node verification scripts (see below)
 ```
 
+## Deploying
+
+### GitHub Pages (built in)
+
+`.github/workflows/deploy.yml` builds and publishes automatically on every
+push to `main`. One-time setup: repo **Settings → Pages → Source →
+"GitHub Actions"**. The workflow bakes the `/<repo>/` base path into the
+build (`VITE_BASE`), and the post-build step emits `404.html` +
+`.nojekyll` so deep links (`/manga/:id`) survive Pages' lack of SPA
+rewrites. Using a custom domain or a `<user>.github.io` root repo? Set
+`VITE_BASE: /` in the workflow.
+
+### Cloudflare Pages / Netlify / Vercel
+
+Also works as-is: build command `npm run build`, output directory `dist`,
+no `VITE_BASE` needed (they serve from the root and support SPA fallback).
+
+## Interface layout
+
+The app picks mobile (bottom app navigation) or desktop (header
+navigation) chrome automatically from pointer type + viewport width, and
+re-evaluates live on rotation/resize. Settings → Appearance → *Interface
+layout* can force either one.
+
 ## Theming
 
 Theme colors are CSS variables defined per `[data-theme=...]` block in

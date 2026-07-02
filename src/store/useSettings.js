@@ -12,6 +12,9 @@ export const useSettings = create(
     (set) => ({
       theme: DEFAULT_THEME,
 
+      // 'auto' detects from pointer type + viewport; 'mobile'/'desktop' force.
+      layout: 'auto',
+
       background: {
         enabled: false,
         blur: 12, // px, 0–24
@@ -34,6 +37,7 @@ export const useSettings = create(
       contentRatings: ['safe', 'suggestive'],
 
       setTheme: (theme) => set({ theme }),
+      setLayout: (layout) => set({ layout }),
       setBackground: (patch) =>
         set((state) => ({ background: { ...state.background, ...patch } })),
       setReader: (patch) => set((state) => ({ reader: { ...state.reader, ...patch } })),

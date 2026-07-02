@@ -19,6 +19,7 @@ import {
   notifyBackgroundChanged,
 } from '../lib/backgroundStore'
 import { useObjectUrl } from '../hooks/useObjectUrl'
+import { useLayoutMode } from '../hooks/useLayoutMode'
 
 const LANGUAGES = [
   { value: 'en', label: 'English' },
@@ -42,6 +43,7 @@ export default function SettingsPage() {
       <div className="max-w-3xl space-y-14">
         <SettingsSection index="01" title="Appearance">
           <ThemePicker />
+          <LayoutSettings />
           <BackgroundSettings />
         </SettingsSection>
 
@@ -124,6 +126,34 @@ function ThemePicker() {
         ))}
       </div>
     </div>
+  )
+}
+
+function LayoutSettings() {
+  const layout = useSettings((s) => s.layout)
+  const setLayout = useSettings((s) => s.setLayout)
+  const resolved = useLayoutMode()
+
+  return (
+    <FieldRow
+      label="Interface layout"
+      hint={
+        layout === 'auto'
+          ? `Detected from your device — currently ${resolved === 'mobile' ? 'mobile (bottom navigation)' : 'desktop (header navigation)'}.`
+          : 'Forced — switch to Auto to follow the device.'
+      }
+    >
+      <SegmentedControl
+        label="Interface layout"
+        value={layout}
+        onChange={setLayout}
+        options={[
+          { value: 'auto', label: 'Auto' },
+          { value: 'mobile', label: 'Mobile' },
+          { value: 'desktop', label: 'Desktop' },
+        ]}
+      />
+    </FieldRow>
   )
 }
 
