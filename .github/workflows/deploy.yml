@@ -2,7 +2,9 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    # Deploys from the current default branch; keep main listed so the
+    # workflow keeps working if the repo is ever switched over to it.
+    branches: [main, claude/manga-reader-scaffold-byy4by]
   workflow_dispatch:
 
 permissions:
