@@ -133,17 +133,22 @@ export function coverUrl(mangaId, fileName, size) {
   return `${COVER_BASE}/${mangaId}/${fileName}${suffix}`
 }
 
+const DEFAULT_CONTENT_RATINGS = ['safe', 'suggestive']
+
 /**
  * Search manga by title.
  * Returns { items, total, limit, offset } where items are normalized manga.
  */
-export async function searchManga(title, { limit = 20, offset = 0 } = {}) {
+export async function searchManga(
+  title,
+  { limit = 20, offset = 0, contentRatings = DEFAULT_CONTENT_RATINGS } = {},
+) {
   const body = await request('/manga', {
     title,
     limit,
     offset,
     includes: ['cover_art'],
-    contentRating: ['safe', 'suggestive'],
+    contentRating: contentRatings,
     order: { relevance: 'desc' },
   })
   return {
@@ -166,7 +171,7 @@ export async function getManga(mangaId) {
  */
 export async function getChapters(
   mangaId,
-  { languages = ['en'], limit = 100, offset = 0 } = {},
+  { languages = ['en'], limit = 100, offset = 0, contentRatings = DEFAULT_CONTENT_RATINGS } = {},
 ) {
   const body = await request(`/manga/${mangaId}/feed`, {
     translatedLanguage: languages,
@@ -174,7 +179,7 @@ export async function getChapters(
     offset,
     includes: ['scanlation_group'],
     order: { volume: 'asc', chapter: 'asc' },
-    contentRating: ['safe', 'suggestive'],
+    contentRating: contentRatings,
   })
   return {
     items: body.data.map(normalizeChapter),
@@ -182,6 +187,43 @@ export async function getChapters(
     limit: body.limit,
     offset: body.offset,
   }
+}
+
+/** Max chapters fetched by getChaptersAll — a runaway/pathological-feed guard. */
+const FEED_PAGE_SIZE = 500
+const FEED_MAX_PAGES = 20
+
+/**
+ * Fetch the complete chapter feed for a manga, paging through the API in
+ * 500-item batches with a small delay between requests (MangaDex allows
+ * ~5 req/s per IP). `onProgress(loaded, total)` fires after each batch.
+ */
+export async function getChaptersAll(mangaId, { languages, contentRatings } = {}, onProgress) {
+  const items = []
+  let offset = 0
+  let total = Infinity
+  for (let page = 0; page < FEED_MAX_PAGES && offset < total; page++) {
+    if (page > 0) await new Promise((resolve) => setTimeout(resolve, 250))
+    const batch = await getChapters(mangaId, {
+      languages,
+      contentRatings,
+      limit: FEED_PAGE_SIZE,
+      offset,
+    })
+    items.push(...batch.items)
+    total = batch.total
+    offset += FEED_PAGE_SIZE
+    onProgress?.(Math.min(items.length, total), total)
+  }
+  return items
+}
+
+/** Fetch a single chapter (deep-link fallback), with its manga id resolved. */
+export async function getChapter(chapterId) {
+  const body = await request(`/chapter/${chapterId}`, { includes: ['scanlation_group', 'manga'] })
+  const chapter = normalizeChapter(body.data)
+  const mangaRel = body.data.relationships?.find((rel) => rel.type === 'manga')
+  return { ...chapter, mangaId: mangaRel?.id ?? null }
 }
 
 /**

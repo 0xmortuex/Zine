@@ -1,1 +1,262 @@
 @import 'tailwindcss';
+
+/* ---------------------------------------------------------------------------
+ * Theme tokens
+ *
+ * Layer 1: raw per-theme variables, swapped by data-theme on <html>.
+ * Layer 2: the @theme inline block below maps them into Tailwind's color
+ * namespace. `inline` makes utilities emit the var() reference itself
+ * (background-color: var(--bg)) instead of a build-time value, so every
+ * bg-surface / text-muted utility repaints live when the theme changes.
+ * ------------------------------------------------------------------------ */
+
+:root,
+[data-theme='midnight'] {
+  --bg: oklch(0.16 0.02 265);
+  --surface: oklch(0.205 0.022 265);
+  --surface-raised: oklch(0.255 0.024 265);
+  --border: oklch(0.32 0.025 265);
+  --text: oklch(0.93 0.01 265);
+  --text-muted: oklch(0.64 0.02 265);
+  --accent: oklch(0.72 0.16 250);
+  --accent-fg: oklch(0.16 0.04 250);
+  color-scheme: dark;
+}
+
+[data-theme='ember'] {
+  --bg: oklch(0.15 0.005 285);
+  --surface: oklch(0.2 0.006 285);
+  --surface-raised: oklch(0.25 0.007 285);
+  --border: oklch(0.32 0.008 285);
+  --text: oklch(0.94 0.002 285);
+  --text-muted: oklch(0.63 0.01 285);
+  --accent: oklch(0.7 0.19 45);
+  --accent-fg: oklch(0.15 0.04 45);
+  color-scheme: dark;
+}
+
+[data-theme='void'] {
+  --bg: oklch(0 0 0);
+  --surface: oklch(0.14 0 0);
+  --surface-raised: oklch(0.19 0 0);
+  --border: oklch(0.28 0 0);
+  --text: oklch(0.95 0 0);
+  --text-muted: oklch(0.6 0 0);
+  --accent: oklch(0.63 0.24 27);
+  --accent-fg: oklch(0.97 0.01 27);
+  color-scheme: dark;
+}
+
+[data-theme='paper'] {
+  --bg: oklch(0.965 0.012 90);
+  --surface: oklch(0.99 0.005 90);
+  --surface-raised: oklch(1 0 0);
+  --border: oklch(0.86 0.015 90);
+  --text: oklch(0.24 0.02 270);
+  --text-muted: oklch(0.5 0.02 270);
+  --accent: oklch(0.45 0.15 260);
+  --accent-fg: oklch(0.97 0.01 260);
+  color-scheme: light;
+}
+
+[data-theme='sakura'] {
+  --bg: oklch(0.955 0.018 350);
+  --surface: oklch(0.985 0.008 350);
+  --surface-raised: oklch(1 0 0);
+  --border: oklch(0.86 0.03 350);
+  --text: oklch(0.28 0.04 355);
+  --text-muted: oklch(0.52 0.06 355);
+  --accent: oklch(0.6 0.2 5);
+  --accent-fg: oklch(0.97 0.01 5);
+  color-scheme: light;
+}
+
+[data-theme='matcha'] {
+  --bg: oklch(0.2 0.025 150);
+  --surface: oklch(0.245 0.027 150);
+  --surface-raised: oklch(0.295 0.03 150);
+  --border: oklch(0.37 0.035 150);
+  --text: oklch(0.93 0.015 145);
+  --text-muted: oklch(0.64 0.03 145);
+  --accent: oklch(0.76 0.14 140);
+  --accent-fg: oklch(0.2 0.05 140);
+  color-scheme: dark;
+}
+
+/* Custom uploaded background active: surfaces go translucent + frosted so
+ * the UI layers over the image instead of hiding it. */
+[data-custom-bg='true'] {
+  --surface: color-mix(in oklab, var(--bg) 72%, transparent);
+  --surface-raised: color-mix(in oklab, var(--bg) 82%, transparent);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-border: var(--border);
+  --color-text: var(--text);
+  --color-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+}
+
+/* ---------------------------------------------------------------------------
+ * Base
+ * ------------------------------------------------------------------------ */
+
+html {
+  background-color: var(--bg);
+}
+
+body {
+  background-color: transparent;
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow-y: scroll;
+}
+
+::selection {
+  background-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    transition: background-color 200ms ease;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Zine design-identity utilities
+ * ------------------------------------------------------------------------ */
+
+@utility text-display {
+  letter-spacing: -0.035em;
+  font-weight: 750;
+  line-height: 0.95;
+}
+
+@utility tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+}
+
+/* Hairline rule — the recurring editorial divider. */
+@utility rule-h {
+  height: 1px;
+  background: linear-gradient(to right, var(--border) 0%, transparent 100%);
+}
+
+/* Print-style stamp chip (status, rating, tags). */
+@utility stamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  border: 1px solid var(--border);
+  padding: 0.1rem 0.45rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border-radius: 2px;
+}
+
+@utility stamp-accent {
+  border-color: color-mix(in oklab, var(--accent) 55%, transparent);
+  color: var(--accent);
+}
+
+/* Risograph offset "ink shadow": a misprint-style accent plate behind the
+ * element, revealed on hover via transform/opacity only. Parent needs
+ * position:relative; pair with .ink-shadow-target on hover. */
+@utility ink-plate {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--accent);
+  opacity: 0;
+  transform: translate(0, 0);
+  transition:
+    transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 200ms ease;
+}
+
+.group\/ink:hover .ink-plate,
+.group\/ink:focus-visible .ink-plate {
+  opacity: 0.9;
+  transform: translate(6px, 6px);
+}
+
+/* Skeleton shimmer aligned to the baseline grid. */
+@utility shimmer {
+  position: relative;
+  overflow: hidden;
+  background: color-mix(in oklab, var(--surface-raised) 80%, var(--border));
+}
+
+.shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklab, var(--text) 7%, transparent),
+    transparent
+  );
+  animation: shimmer-sweep 1.6s infinite;
+}
+
+@keyframes shimmer-sweep {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Frosted surface for panels floating over imagery. */
+@utility frosted {
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+}
+
+/* Focus ring, consistent everywhere. */
+@utility focus-ink {
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
+
+/* Hide scrollbars where the rail itself is the affordance (reader strips). */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Reduced motion: kill decorative CSS motion; motion/react handles the rest
+ * via <MotionConfig reducedMotion="user">.
+ * ------------------------------------------------------------------------ */
+
+@media (prefers-reduced-motion: reduce) {
+  .shimmer::after {
+    animation: none;
+  }
+  html {
+    transition: none;
+  }
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

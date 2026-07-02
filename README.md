@@ -1,7 +1,8 @@
 # Zine
 
-A personal manga reader built with React, Vite, and Tailwind CSS, backed by the
-official public [MangaDex REST API](https://api.mangadex.org/docs/).
+A personal manga reader with an editorial, print-zine design language.
+React 19 + Vite + Tailwind CSS v4 + motion, backed by the official public
+[MangaDex REST API](https://api.mangadex.org/docs/).
 
 ## Getting started
 
@@ -10,38 +11,81 @@ npm install
 npm run dev
 ```
 
+To develop without network access to MangaDex (or to get reproducible data
+for every UI state), run against the built-in fixtures:
+
+```sh
+VITE_USE_FIXTURES=1 npm run dev
+```
+
+## Features
+
+- **Discover** — title search with load-more pagination, skeleton loaders,
+  empty/error states.
+- **Detail page** — magazine-spread hero with blurred cover backdrop,
+  shared-element cover transition, favorite, expandable description; chapter
+  list as a spine rail with language filter, sort, collapsible volume
+  grouping, scanlation-dedupe with expandable version chips, read ticks,
+  unread filter, and external-chapter handling.
+- **Reader** — paged and vertical (webtoon) modes; fit width/height/original;
+  RTL/LTR; tap zones, keyboard shortcuts, tick-rail scrubber; chapter
+  prev/next with an end-of-chapter countdown interstitial; fullscreen;
+  auto-hiding chrome; data saver; smart page preloading with expiry-aware
+  refetch; **autoplay** with a user-set timer, progress ring, and smooth
+  auto-scroll in vertical mode; in-reader quick settings sheet.
+- **Library** — favorites, continue-reading shelf with progress bars,
+  reading history, per-manga resume.
+- **Personalization** — six theme presets with live swatches, custom
+  background upload (stored in IndexedDB) with blur/dim/fit controls,
+  reader defaults, language and content-rating filters, clear-data controls.
+
+### Keyboard shortcuts (reader)
+
+| Key | Action |
+| --- | --- |
+| `←` / `→` | Turn page (honors reading direction) |
+| `Space` | Play/pause autoplay |
+| `,` / `.` | Autoplay timer −/+ |
+| `M` | Toggle paged/vertical mode |
+| `F` | Fullscreen |
+| `Esc` | Back to the series page |
+
 ## Project layout
 
 ```
 src/
-  api/mangadex.js   # MangaDex API client (search, chapters, page URLs)
-  App.jsx           # App shell — currently a search UI over the API client
-  main.jsx          # React entry point
-  index.css         # Tailwind entry
+  api/        mangadex.js (real client) · fixtures.js · index.js (switcher)
+  lib/        themes.js · chapters.js (dedupe/grouping) · preload.js · backgroundStore.js
+  store/      useSettings.js · useLibrary.js · useToasts.js · chapterCache.js
+  hooks/      useChapters · useAutoplay · useMangaSearch · useKeyboard · useFullscreen · useObjectUrl
+  components/ layout, cards, chapter rows, ui/ primitives, reader/ components
+  pages/      HomePage · MangaPage · ReaderPage · SettingsPage · NotFoundPage
+scripts/      node verification scripts (see below)
 ```
 
-## API client
+## Theming
 
-`src/api/mangadex.js` wraps the four endpoints the reader needs:
+Theme colors are CSS variables defined per `[data-theme=...]` block in
+`src/index.css`, mapped into Tailwind via `@theme inline` so utilities like
+`bg-surface` emit live `var()` references and repaint instantly on theme
+switch. An inline script in `index.html` applies the persisted theme before
+first paint. Add a theme by adding a variable block in `index.css` and an
+entry in `src/lib/themes.js`.
 
-| Function | Endpoint | Purpose |
-| --- | --- | --- |
-| `searchManga(title, { limit, offset })` | `GET /manga` | Title search with covers resolved |
-| `getManga(id)` | `GET /manga/{id}` | Single manga details |
-| `getChapters(id, { languages, limit, offset })` | `GET /manga/{id}/feed` | Chapter list, volume/chapter ascending |
-| `getChapterPages(chapterId, { dataSaver })` | `GET /at-home/server/{id}` | Ordered page image URLs |
+## Verification
 
-All functions return normalized plain objects; failures throw `MangaDexError`
-with `status` and `detail`.
+```sh
+npm run lint && npm run build
+node scripts/check-mangadex.mjs      # API client: pagination loop, deep-link fallback
+node scripts/check-chapters-lib.mjs  # dedupe/canonical/volume-grouping/prev-next rules
+node scripts/check-autoplay.mjs      # autoplay stepper + preload window math
+```
 
-### Things worth knowing
+## MangaDex API notes
 
-- **Page URLs expire.** `getChapterPages` resolves URLs through MangaDex's
-  at-home network; the base URL is valid for ~15 minutes, so fetch right
-  before reading rather than caching.
-- **Covers need `referrerPolicy="no-referrer"`.** `uploads.mangadex.org`
-  rejects hotlinked images that carry a foreign `Referer` header.
-- **Rate limits.** The API allows roughly 5 requests/second per IP; 429
-  responses surface as a `MangaDexError` with `status: 429`.
-- **External chapters.** Some chapters are hosted off-site (`externalUrl`
-  set, `pages === 0`) and can't be read in-app.
+- Page URLs from `/at-home/server` expire (~15 min): the reader refetches
+  transparently on staleness or image error.
+- Covers must be rendered with `referrerPolicy="no-referrer"` —
+  `uploads.mangadex.org` rejects foreign referrers.
+- The API allows ~5 req/s per IP; the full-feed fetch paces itself and 429s
+  surface as typed `MangaDexError`s.
