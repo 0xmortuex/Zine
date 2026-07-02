@@ -42,11 +42,18 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.attempt3.outputs.page_url || steps.attempt2.outputs.page_url || steps.attempt1.outputs.page_url }}
     steps:
-      - id: deployment
+      # deploy-pages caps its timeout at 10 minutes, and GitHub's Pages
+      # queue sometimes takes longer than that to pick a deployment up.
+      # Retry up to three times (~30 minutes of coverage) instead.
+      - id: attempt1
         uses: actions/deploy-pages@v4
-        with:
-          # Pages' deployment queue can be slow; the 10-minute default
-          # timeout has aborted otherwise-healthy deployments.
-          timeout: 1800000
+        continue-on-error: true
+      - id: attempt2
+        if: steps.attempt1.outcome == 'failure'
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+      - id: attempt3
+        if: steps.attempt1.outcome == 'failure' && steps.attempt2.outcome == 'failure'
+        uses: actions/deploy-pages@v4
