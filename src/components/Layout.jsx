@@ -3,6 +3,7 @@ import BackgroundLayer from './BackgroundLayer'
 import ToastStack from './Toast'
 import Icon from './ui/Icon'
 import clsx from 'clsx'
+import { USING_FIXTURES } from '../api'
 
 /**
  * App chrome: masthead with the lowercase wordmark, hairline rule, content
@@ -20,6 +21,11 @@ export default function Layout({ children }) {
             <span className="hidden text-[0.65rem] font-semibold tracking-[0.22em] text-muted uppercase sm:inline">
               personal manga index
             </span>
+            {USING_FIXTURES && (
+              <span className="stamp stamp-accent" title="VITE_USE_FIXTURES is set — showing generated stand-in data, not live MangaDex">
+                offline fixtures
+              </span>
+            )}
           </Link>
           <nav className="flex items-center gap-1">
             <HeaderLink to="/" end icon="search" label="Browse" />

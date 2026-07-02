@@ -16,21 +16,115 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /* ----------------------------------------------------------------------- */
 
-function svgDataUri({ width, height, hue, title, subtitle }) {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-  <rect width="100%" height="100%" fill="oklch(0.3 0.08 ${hue})"/>
-  <rect x="12" y="12" width="${width - 24}" height="${height - 24}" fill="none" stroke="oklch(0.7 0.12 ${hue})" stroke-width="2"/>
-  <text x="50%" y="46%" text-anchor="middle" fill="oklch(0.92 0.05 ${hue})" font-family="system-ui" font-weight="700" font-size="${Math.round(width / 9)}">${title}</text>
-  <text x="50%" y="58%" text-anchor="middle" fill="oklch(0.75 0.08 ${hue})" font-family="system-ui" font-size="${Math.round(width / 16)}">${subtitle}</text>
-</svg>`
-  return `data:image/svg+xml,${encodeURIComponent(svg)}`
+const uri = (svg) => `data:image/svg+xml,${encodeURIComponent(svg)}`
+
+/* Deterministic pseudo-random per seed so covers are stable across reloads. */
+const rand = (seed) => {
+  const x = Math.sin(seed * 127.1 + 311.7) * 43758.5453
+  return x - Math.floor(x)
 }
 
-const fixtureCover = (index, title) =>
-  svgDataUri({ width: 400, height: 600, hue: (index * 47) % 360, title, subtitle: 'fixture' })
+/**
+ * Generated manga-style cover: gradient sky, sun/moon, mountain silhouettes,
+ * halftone corner, speed-line band, masthead title. Distinct palette and
+ * composition per series index.
+ */
+function fixtureCover(index, title) {
+  const hue = (index * 47 + 20) % 360
+  const hue2 = (hue + 40) % 360
+  const night = index % 3 === 0
+  const skyTop = night ? `oklch(0.25 0.09 ${hue})` : `oklch(0.85 0.08 ${hue})`
+  const skyBottom = night ? `oklch(0.45 0.12 ${hue2})` : `oklch(0.68 0.14 ${hue2})`
+  const ink = night ? 'oklch(0.16 0.04 280)' : `oklch(0.28 0.09 ${hue})`
+  const orb = night ? 'oklch(0.95 0.02 90)' : `oklch(0.88 0.16 ${(hue + 80) % 360})`
+  const orbX = 90 + rand(index) * 220
+  const orbY = 110 + rand(index + 1) * 120
+  const m1 = 300 - rand(index + 2) * 90
+  const m2 = 340 - rand(index + 3) * 70
+  const dots = Array.from({ length: 24 }, (_, d) => {
+    const col = d % 6
+    const row = Math.floor(d / 6)
+    return `<circle cx="${330 + col * 12}" cy="${20 + row * 12}" r="${3.4 - row * 0.55}" fill="${ink}" opacity="0.5"/>`
+  }).join('')
+  const speedLines = Array.from({ length: 9 }, (_, s) => {
+    const y = 380 + s * 12 + rand(index + s) * 6
+    return `<line x1="0" y1="${y}" x2="${140 + rand(index + s + 9) * 160}" y2="${y}" stroke="${ink}" stroke-width="${1 + (s % 3)}" opacity="${0.25 + (s % 3) * 0.12}"/>`
+  }).join('')
+  const words = title.split(' ')
+  const line1 = words.slice(0, Math.ceil(words.length / 2)).join(' ')
+  const line2 = words.slice(Math.ceil(words.length / 2)).join(' ')
 
-const fixturePage = (hue, n) =>
-  svgDataUri({ width: 800, height: 1200, hue, title: `p. ${n}`, subtitle: 'fixture page' })
+  return uri(`<svg xmlns="http://www.w3.org/2000/svg" width="400" height="600" viewBox="0 0 400 600">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="${skyTop}"/><stop offset="1" stop-color="${skyBottom}"/>
+    </linearGradient>
+  </defs>
+  <rect width="400" height="600" fill="url(#sky)"/>
+  <circle cx="${orbX}" cy="${orbY}" r="58" fill="${orb}"/>
+  <circle cx="${orbX}" cy="${orbY}" r="58" fill="none" stroke="${ink}" stroke-width="2" opacity="0.25"/>
+  ${dots}
+  <polygon points="0,${m1} 150,${m1 - 120} 290,${m1 + 40} 0,${m1 + 200}" fill="${ink}" opacity="0.75"/>
+  <polygon points="400,${m2} 250,${m2 - 90} 120,${m2 + 60} 400,${m2 + 180}" fill="${ink}" opacity="0.9"/>
+  ${speedLines}
+  <rect x="0" y="452" width="400" height="148" fill="oklch(0.97 0.01 ${hue})"/>
+  <rect x="0" y="452" width="400" height="6" fill="${ink}"/>
+  <text x="22" y="512" font-family="Georgia, serif" font-weight="bold" font-size="34" fill="${ink}">${line1}</text>
+  ${line2 ? `<text x="22" y="552" font-family="Georgia, serif" font-weight="bold" font-size="34" fill="${ink}">${line2}</text>` : ''}
+  <text x="22" y="582" font-family="system-ui" font-size="13" letter-spacing="4" fill="${ink}" opacity="0.6">ZINE FIXTURE PRESS</text>
+  <rect x="352" y="470" width="34" height="112" fill="${ink}"/>
+  <text x="369" y="480" font-family="system-ui" font-size="12" fill="white" writing-mode="tb" letter-spacing="3">VOL. ${(index % 4) + 1}</text>
+</svg>`)
+}
+
+/**
+ * Generated manga page: paper background, panel grid with varied layout,
+ * screentone dots, speech bubble, action burst, page number.
+ */
+function fixturePage(seed, n) {
+  const layout = (seed + n) % 3
+  const tone = Array.from({ length: 60 }, (_, d) => {
+    const col = d % 10
+    const row = Math.floor(d / 10)
+    return `<circle cx="${76 + col * 13}" cy="${86 + row * 13}" r="2.2" fill="black" opacity="0.35"/>`
+  }).join('')
+  const panels =
+    layout === 0
+      ? `<rect x="60" y="70" width="680" height="380" class="p"/>
+         <rect x="60" y="480" width="330" height="300" class="p"/>
+         <rect x="420" y="480" width="320" height="300" class="p"/>
+         <rect x="60" y="810" width="680" height="320" class="p"/>`
+      : layout === 1
+        ? `<rect x="60" y="70" width="330" height="500" class="p"/>
+           <rect x="420" y="70" width="320" height="230" class="p"/>
+           <rect x="420" y="330" width="320" height="240" class="p"/>
+           <polygon points="60,600 740,640 740,1130 60,1130" class="p"/>`
+        : `<rect x="60" y="70" width="680" height="240" class="p"/>
+           <polygon points="60,340 420,340 340,700 60,700" class="p"/>
+           <polygon points="450,340 740,340 740,700 370,700" class="p"/>
+           <rect x="60" y="730" width="680" height="400" class="p"/>`
+  const burst = Array.from({ length: 12 }, (_, s) => {
+    const a = (s / 12) * Math.PI * 2
+    const r1 = 40
+    const r2 = 78 + (s % 2) * 22
+    const cx = 560
+    const cy = 940
+    return `<line x1="${cx + Math.cos(a) * r1}" y1="${cy + Math.sin(a) * r1}" x2="${cx + Math.cos(a) * r2}" y2="${cy + Math.sin(a) * r2}" stroke="black" stroke-width="3"/>`
+  }).join('')
+
+  return uri(`<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1200" viewBox="0 0 800 1200">
+  <style>.p{fill:white;stroke:black;stroke-width:4}</style>
+  <rect width="800" height="1200" fill="oklch(0.97 0.005 90)"/>
+  ${panels}
+  ${tone}
+  <ellipse cx="240" cy="180" rx="120" ry="62" fill="white" stroke="black" stroke-width="3"/>
+  <polygon points="230,236 260,232 218,278" fill="white" stroke="black" stroke-width="3"/>
+  <text x="240" y="176" text-anchor="middle" font-family="system-ui" font-weight="bold" font-size="26">PAGE ${n}!</text>
+  ${burst}
+  <text x="560" y="950" text-anchor="middle" font-family="system-ui" font-weight="900" font-size="40" transform="rotate(-8 560 940)">FIX!</text>
+  <text x="400" y="1180" text-anchor="middle" font-family="Georgia, serif" font-size="22" fill="black">— ${n} —</text>
+</svg>`)
+}
 
 /* ----------------------------------------------------------------------- */
 
