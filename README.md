@@ -105,6 +105,24 @@ node scripts/check-chapters-lib.mjs  # dedupe/canonical/volume-grouping/prev-nex
 node scripts/check-autoplay.mjs      # autoplay stepper + preload window math
 ```
 
+## MangaDex API and CORS (hosted deployments)
+
+MangaDex's API does not send CORS headers for third-party origins, so a
+hosted Zine (GitHub Pages, Cloudflare, …) can't call it directly from the
+browser. Zine handles this in two layers:
+
+1. **Zero-setup fallback** — when a direct call fails at the network level,
+   the client automatically retries through a public CORS relay
+   (allorigins.win). Works out of the box, but it's a shared free service:
+   expect occasional slowness.
+2. **Personal proxy (recommended)** — deploy `cors-proxy/worker.js` as a
+   Cloudflare Worker (free, ~5 minutes, instructions in the file header) and
+   paste the worker URL into **Settings → Content → API proxy**. All API
+   traffic then goes through your own fast, private relay.
+
+Images (covers, chapter pages) are unaffected — they load as plain `<img>`
+elements, which browsers don't subject to CORS.
+
 ## MangaDex API notes
 
 - Page URLs from `/at-home/server` expire (~15 min): the reader refetches

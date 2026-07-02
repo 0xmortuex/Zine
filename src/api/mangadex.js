@@ -15,12 +15,33 @@
 const API_BASE = 'https://api.mangadex.org'
 const COVER_BASE = 'https://uploads.mangadex.org/covers'
 
+/**
+ * MangaDex's API doesn't send CORS headers for third-party origins, so
+ * direct browser calls from a hosted site (e.g. GitHub Pages) fail as
+ * opaque network errors. Two escape hatches, in priority order:
+ *   1. A user-configured proxy (Settings → Content → API proxy) — e.g. a
+ *      personal Cloudflare Worker (see cors-proxy/worker.js).
+ *   2. A public CORS relay as an automatic zero-setup fallback.
+ */
+const PUBLIC_CORS_RELAY = (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
+
+function userProxyBase() {
+  try {
+    const raw = localStorage.getItem('zine-settings')
+    const proxy = raw ? JSON.parse(raw)?.state?.apiProxy : ''
+    return proxy ? proxy.trim().replace(/\/+$/, '') : null
+  } catch {
+    return null
+  }
+}
+
 export class MangaDexError extends Error {
-  constructor(message, { status, detail } = {}) {
+  constructor(message, { status, detail, network = false } = {}) {
     super(message)
     this.name = 'MangaDexError'
     this.status = status
     this.detail = detail
+    this.network = network
   }
 }
 
@@ -47,14 +68,15 @@ function buildQuery(params = {}) {
   return s ? `?${s}` : ''
 }
 
-async function request(path, params) {
+async function doFetch(url) {
   let res
   try {
-    res = await fetch(`${API_BASE}${path}${buildQuery(params)}`, {
-      headers: { Accept: 'application/json' },
-    })
+    res = await fetch(url, { headers: { Accept: 'application/json' } })
   } catch (err) {
-    throw new MangaDexError('Network error reaching MangaDex', { detail: err.message })
+    throw new MangaDexError('Network error reaching MangaDex', {
+      detail: err.message,
+      network: true,
+    })
   }
 
   if (res.status === 429) {
@@ -72,6 +94,24 @@ async function request(path, params) {
     })
   }
   return body
+}
+
+async function request(path, params) {
+  const pathAndQuery = `${path}${buildQuery(params)}`
+  const proxy = userProxyBase()
+
+  try {
+    return await doFetch(`${proxy ?? API_BASE}${pathAndQuery}`)
+  } catch (err) {
+    // A network-level failure on a direct browser call is almost always the
+    // CORS block; retry once through the public relay so hosted deployments
+    // work with zero setup. Never engages in node or when a proxy is set.
+    const isBrowser = typeof window !== 'undefined'
+    if (err instanceof MangaDexError && err.network && !proxy && isBrowser) {
+      return await doFetch(PUBLIC_CORS_RELAY(`${API_BASE}${pathAndQuery}`))
+    }
+    throw err
+  }
 }
 
 /** Pick a display string from MangaDex's localized-string maps ({ en: "...", ja: "..." }). */

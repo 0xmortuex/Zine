@@ -36,6 +36,10 @@ export const useSettings = create(
       languages: ['en'],
       contentRatings: ['safe', 'suggestive'],
 
+      // Optional CORS proxy base URL for the MangaDex API (see
+      // cors-proxy/worker.js). Empty = direct + public-relay fallback.
+      apiProxy: '',
+
       setTheme: (theme) => set({ theme }),
       setLayout: (layout) => set({ layout }),
       setBackground: (patch) =>
@@ -43,6 +47,7 @@ export const useSettings = create(
       setReader: (patch) => set((state) => ({ reader: { ...state.reader, ...patch } })),
       setLanguages: (languages) => set({ languages }),
       setContentRatings: (contentRatings) => set({ contentRatings }),
+      setApiProxy: (apiProxy) => set({ apiProxy }),
     }),
     { name: 'zine-settings' },
   ),

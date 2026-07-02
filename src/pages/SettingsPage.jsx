@@ -391,6 +391,8 @@ function ContentSettings() {
   const setLanguages = useSettings((s) => s.setLanguages)
   const contentRatings = useSettings((s) => s.contentRatings)
   const setContentRatings = useSettings((s) => s.setContentRatings)
+  const apiProxy = useSettings((s) => s.apiProxy)
+  const setApiProxy = useSettings((s) => s.setApiProxy)
 
   function toggleRating(rating) {
     const next = contentRatings.includes(rating)
@@ -434,6 +436,23 @@ function ContentSettings() {
             )
           })}
         </div>
+      </div>
+
+      <div>
+        <p className="mb-1 text-sm font-medium">API proxy</p>
+        <p className="mb-3 text-xs text-muted">
+          MangaDex blocks direct browser calls from other websites (CORS). Without a proxy, Zine
+          falls back to a public relay, which can be slow. For a fast, reliable connection, deploy
+          the 1-file Cloudflare Worker from <code className="text-accent">cors-proxy/worker.js</code>{' '}
+          in the repo and paste its URL here.
+        </p>
+        <input
+          type="url"
+          value={apiProxy}
+          onChange={(e) => setApiProxy(e.target.value)}
+          placeholder="https://zine-mangadex.your-name.workers.dev"
+          className="focus-ink w-full max-w-md rounded-md border border-border bg-surface-raised px-3 py-2 text-sm outline-none placeholder:text-muted focus:border-accent"
+        />
       </div>
     </div>
   )
