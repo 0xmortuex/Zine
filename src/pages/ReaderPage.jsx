@@ -22,7 +22,7 @@ import { createPreloader, isStale } from '../lib/preload'
 import { estimateReadSeconds } from '../lib/pageTiming'
 import { dedupeChapters, findPrevNext, formatChapterLabel } from '../lib/chapters'
 
-const CHROME_IDLE_MS = 2500
+const CHROME_IDLE_MS = 4000
 const INTERSTITIAL_SECONDS = 3
 const EMPTY_READ = {}
 
@@ -279,30 +279,58 @@ export default function ReaderPage() {
     else setVerticalPlaying((v) => !v)
   }, [reader.mode, autoplay])
 
-  /* ----------------------------- chrome idle ----------------------------- */
+  /* ----------------------------- chrome idle -----------------------------
+   * Predictable rules:
+   *  - While paused / reading manually, the panel NEVER auto-hides; a
+   *    center tap toggles it.
+   *  - While autoplay/auto-scroll runs, it auto-hides after 4s with no
+   *    interaction; touching any control resets the clock.
+   *  - Only real mouse movement summons it passively (mobile browsers fire
+   *    synthetic mouse events around taps, which must not fight the tap
+   *    toggle).
+   * --------------------------------------------------------------------- */
+
+  const playingRef = useRef(false)
+
+  const armHide = useCallback(() => {
+    clearTimeout(idleTimer.current)
+    if (playingRef.current) {
+      idleTimer.current = setTimeout(() => setChromeVisible(false), CHROME_IDLE_MS)
+    }
+  }, [])
+
+  /** Any interaction with the chrome itself keeps it alive. */
+  const keepChromeAlive = useCallback(() => {
+    setChromeVisible(true)
+    armHide()
+  }, [armHide])
+
+  useEffect(() => {
+    playingRef.current = playing
+    if (playing) armHide()
+    else clearTimeout(idleTimer.current) // paused → panel stays until dismissed
+  }, [playing, armHide])
+
+  useEffect(() => () => clearTimeout(idleTimer.current), [])
 
   const pokeChrome = useCallback(() => {
     setChromeVisible(true)
-    clearTimeout(idleTimer.current)
-    idleTimer.current = setTimeout(() => setChromeVisible(false), CHROME_IDLE_MS)
-  }, [])
-
-  useEffect(() => {
-    pokeChrome()
-    return () => clearTimeout(idleTimer.current)
-  }, [pokeChrome])
+    armHide()
+  }, [armHide])
 
   const handleCenterTap = useCallback(() => {
     if (reader.tapToPause && playing) {
-      toggleAutoplay()
+      toggleAutoplay() // pause AND surface the controls — always predictable
+      clearTimeout(idleTimer.current)
+      setChromeVisible(true)
       return
     }
     setChromeVisible((visible) => {
       clearTimeout(idleTimer.current)
-      if (!visible) idleTimer.current = setTimeout(() => setChromeVisible(false), CHROME_IDLE_MS)
+      if (!visible) armHide()
       return !visible
     })
-  }, [reader.tapToPause, playing, toggleAutoplay])
+  }, [reader.tapToPause, playing, toggleAutoplay, armHide])
 
   /* ------------------------------- keyboard ------------------------------ */
 
@@ -394,6 +422,7 @@ export default function ReaderPage() {
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: -56, opacity: 0 }}
             transition={{ type: 'spring', stiffness: 380, damping: 34 }}
+            onPointerDownCapture={keepChromeAlive}
             className="frosted absolute inset-x-0 top-0 z-30 flex items-center gap-3 border-b border-border bg-surface px-4 py-2.5"
           >
             <Link
@@ -429,6 +458,7 @@ export default function ReaderPage() {
       <AnimatePresence>
         {chromeVisible && pageSet && (
           <div
+            onPointerDownCapture={keepChromeAlive}
             className={clsx(
               'pointer-events-none absolute inset-x-0 z-30 flex justify-center',
               isMobile ? 'bottom-2 px-2' : 'bottom-4 px-4',

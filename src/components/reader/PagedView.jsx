@@ -32,8 +32,9 @@ export default function PagedView({ url, page, slideDirection, fit, onForward, o
         />
       </AnimatePresence>
 
-      {/* Tap zones: outer thirds page, middle third toggles chrome/autoplay */}
-      <div className="absolute inset-0 z-10 grid grid-cols-3">
+      {/* Tap zones: outer quarters turn pages, the wide middle half toggles
+          chrome/autoplay — a big, easy target on phones. */}
+      <div className="absolute inset-0 z-10 grid grid-cols-[1fr_2fr_1fr]">
         <button
           aria-label={isRtl ? 'Next page' : 'Previous page'}
           onClick={isRtl ? onForward : onBack}
