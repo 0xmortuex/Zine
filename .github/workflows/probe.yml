@@ -1,0 +1,39 @@
+name: Probe sources and relays
+
+on: workflow_dispatch
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe every source and relay
+        run: |
+          UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
+          probe() {
+            local name="$1" url="$2"
+            local meta body
+            meta=$(curl -sS -o /tmp/body -D /tmp/headers -w '%{http_code} in %{time_total}s' --max-time 20 -H 'Accept: application/json' -A "$UA" "$url" 2>&1 | tail -1)
+            body=$(head -c 120 /tmp/body | tr '\n\r' '  ')
+            local acao
+            acao=$(grep -i '^access-control-allow-origin' /tmp/headers | tr -d '\r' || true)
+            printf '=== %-16s %s | %s\n    body: %s\n' "$name" "$meta" "${acao:-no-ACAO-header}" "$body"
+          }
+          MD='https://api.mangadex.org/manga?limit=1'
+          CK='https://api.comick.fun/v1.0/search?q=naruto&limit=1&tachiyomi=true'
+          ENC_MD=$(python3 -c "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=''))" "$MD")
+          ENC_CK=$(python3 -c "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=''))" "$CK")
+
+          probe direct-mangadex "$MD"
+          probe direct-comick "$CK"
+          probe comick-top 'https://api.comick.fun/top?type=trending&comic_types=manga&accept_mature_content=false'
+          probe mangadex-popular 'https://api.mangadex.org/manga?limit=2&order%5BfollowedCount%5D=desc&includes%5B%5D=cover_art'
+
+          probe allorigins-md "https://api.allorigins.win/raw?url=$ENC_MD"
+          probe allorigins-ck "https://api.allorigins.win/raw?url=$ENC_CK"
+          probe alloriginsjson "https://api.allorigins.win/get?url=$ENC_MD"
+          probe codetabs-md "https://api.codetabs.com/v1/proxy?quest=$ENC_MD"
+          probe codetabs-ck "https://api.codetabs.com/v1/proxy?quest=$ENC_CK"
+          probe corsproxy-md "https://corsproxy.io/?url=$ENC_MD"
+          probe cors-eu-md "https://cors.eu.org/$MD"
+          probe cors-lol-md "https://api.cors.lol/?url=$ENC_MD"
+          probe htmldriven-md "https://cors-proxy.htmldriven.com/?url=$ENC_MD"
