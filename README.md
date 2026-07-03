@@ -107,8 +107,9 @@ node scripts/check-autoplay.mjs      # autoplay stepper + preload window math
 
 ## Local shelf (offline, no server)
 
-**Library → On device → Import** accepts `.cbz`/`.zip` chapter archives or
-loose image files. Imports are stored in the browser's IndexedDB and read
+**Library → On device → Import** accepts `.cbz`/`.zip` chapter archives,
+`.pdf` files (each page rendered to an image via PDF.js, loaded on demand),
+or loose image files. Imports are stored in the browser's IndexedDB and read
 with the full reader (autoplay included) with zero network involved — they
 survive reloads and work when MangaDex and the relays are unreachable.
 Each archive becomes one chapter (pages in natural filename order); more

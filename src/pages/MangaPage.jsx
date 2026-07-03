@@ -111,7 +111,7 @@ function LocalControls({ manga, onChanged }) {
       <input
         ref={fileInput}
         type="file"
-        accept=".cbz,.zip,image/*"
+        accept=".cbz,.zip,.pdf,application/pdf,image/*"
         multiple
         onChange={handleFiles}
         className="hidden"

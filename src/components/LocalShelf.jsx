@@ -66,14 +66,15 @@ export default function LocalShelf() {
       </div>
 
       <p className="mb-6 text-xs text-muted">
-        Add your own manga: chapter archives (<code>.cbz</code>/<code>.zip</code>) or image files.
-        They're stored in this browser and read fully offline — no servers involved.
+        Add your own manga: chapter archives (<code>.cbz</code>/<code>.zip</code>),{' '}
+        <code>.pdf</code> files, or images. Each archive or PDF becomes one chapter. Stored in
+        this browser and read fully offline — no servers involved.
       </p>
 
       <input
         ref={fileInput}
         type="file"
-        accept=".cbz,.zip,image/*"
+        accept=".cbz,.zip,.pdf,application/pdf,image/*"
         multiple
         onChange={handleFiles}
         className="hidden"

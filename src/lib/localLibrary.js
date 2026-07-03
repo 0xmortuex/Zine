@@ -53,6 +53,47 @@ export function extractPagesFromZip(bytes) {
   }))
 }
 
+/**
+ * Render every page of a PDF to a JPEG blob via PDF.js. The library
+ * (~400KB) is imported lazily so it only loads when a PDF is imported.
+ */
+export async function extractPagesFromPdf(file, onProgress) {
+  // The legacy build supports a much wider browser range than the default
+  // build, which leans on very new JS APIs (e.g. Map.getOrInsertComputed).
+  const [pdfjs, { default: PdfWorker }] = await Promise.all([
+    import('pdfjs-dist/legacy/build/pdf.mjs'),
+    import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?worker'),
+  ])
+  if (!pdfjs.GlobalWorkerOptions.workerPort) {
+    pdfjs.GlobalWorkerOptions.workerPort = new PdfWorker()
+  }
+
+  const loadingTask = pdfjs.getDocument({ data: await file.arrayBuffer() })
+  const doc = await loadingTask.promise
+  const blobs = []
+  try {
+    for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber++) {
+      const page = await doc.getPage(pageNumber)
+      // Target ~1600px tall pages: crisp on phones/laptops, sane storage size.
+      const base = page.getViewport({ scale: 1 })
+      const scale = Math.min(3, Math.max(1, 1600 / base.height))
+      const viewport = page.getViewport({ scale })
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.ceil(viewport.width)
+      canvas.height = Math.ceil(viewport.height)
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85))
+      if (!blob) throw new Error(`Could not render page ${pageNumber}`)
+      blobs.push(blob)
+      page.cleanup()
+      onProgress?.(pageNumber, doc.numPages)
+    }
+  } finally {
+    await loadingTask.destroy().catch(() => {})
+  }
+  return blobs
+}
+
 /* ------------------------------ persistence ------------------------------ */
 
 export async function listLocalManga() {
@@ -124,9 +165,11 @@ export async function importChapters(title, files, existingId = null) {
   }
 
   const archives = []
+  const pdfs = []
   const looseImages = []
   for (const file of files) {
     if (/\.(cbz|zip)$/i.test(file.name)) archives.push(file)
+    else if (/\.pdf$/i.test(file.name)) pdfs.push(file)
     else if (isImageEntry(file.name)) looseImages.push(file)
   }
 
@@ -139,6 +182,11 @@ export async function importChapters(title, files, existingId = null) {
       fileName: archive.name,
       blobs: pages.map((p) => new Blob([p.bytes], { type: p.mime })),
     })
+  }
+  for (const pdf of pdfs) {
+    const blobs = await extractPagesFromPdf(pdf)
+    if (blobs.length === 0) continue
+    newChapters.push({ fileName: pdf.name, blobs })
   }
   if (looseImages.length > 0) {
     const ordered = sortPageNames(looseImages.map((f) => f.name)).map((name) =>
