@@ -80,6 +80,17 @@ function SearchTab() {
   const { query, items, total, loading, loadingMore, error, search, loadMore, hasMore } =
     useMangaSearch()
   const [input, setInput] = useState('')
+  const [params] = useSearchParams()
+
+  // ?q= deep links (e.g. a MAL rail card handing off to a title search).
+  const linkedQuery = params.get('q')
+  useEffect(() => {
+    if (linkedQuery && linkedQuery !== query) {
+      setInput(linkedQuery)
+      search(linkedQuery)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkedQuery])
 
   function handleSubmit(event) {
     event.preventDefault()

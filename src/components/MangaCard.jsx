@@ -17,6 +17,11 @@ export default function MangaCard({ manga }) {
       ? Math.min(1, (progress.page + 1) / progress.totalPages)
       : null
 
+  // MAL entries are metadata-only (no chapters) — tapping one hands off to
+  // a title search across the readable sources instead of a detail page.
+  const target =
+    manga.source === 'mal' ? `/?q=${encodeURIComponent(manga.title)}` : `/manga/${manga.id}`
+
   return (
     <motion.div
       variants={{
@@ -24,11 +29,7 @@ export default function MangaCard({ manga }) {
         show: { opacity: 1, y: 0, transition: { duration: 0.3, ease: 'easeOut' } },
       }}
     >
-      <Link
-        to={`/manga/${manga.id}`}
-        className="focus-ink group/ink group block"
-        aria-label={manga.title}
-      >
+      <Link to={target} className="focus-ink group/ink group block" aria-label={manga.title}>
         <motion.div
           whileHover={{ y: -4 }}
           transition={{ type: 'spring', stiffness: 400, damping: 28 }}
@@ -76,6 +77,7 @@ export default function MangaCard({ manga }) {
             {manga.year && <span className="tnum text-xs text-muted">{manga.year}</span>}
             {manga.status && <span className="stamp">{manga.status}</span>}
             {manga.source === 'comick' && <span className="stamp stamp-accent">ck</span>}
+            {manga.source === 'mal' && <span className="stamp">mal</span>}
           </p>
         </div>
       </Link>

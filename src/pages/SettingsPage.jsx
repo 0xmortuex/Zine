@@ -20,6 +20,7 @@ import {
 } from '../lib/backgroundStore'
 import { useObjectUrl } from '../hooks/useObjectUrl'
 import { useLayoutMode } from '../hooks/useLayoutMode'
+import { runConnectionDoctor, summarizeDoctor } from '../lib/diagnostics'
 
 const LANGUAGES = [
   { value: 'en', label: 'English' },
@@ -57,6 +58,10 @@ export default function SettingsPage() {
 
         <SettingsSection index="04" title="Data">
           <DataSettings />
+        </SettingsSection>
+
+        <SettingsSection index="05" title="Connection">
+          <ConnectionDoctor />
         </SettingsSection>
       </div>
     </PageTransition>
@@ -523,6 +528,72 @@ function DataSettings() {
       >
         <Icon name="heart" size={14} /> Clear favorites ({favoritesCount})
       </Button>
+    </div>
+  )
+}
+
+/* ------------------------------ Connection ------------------------------ */
+
+function ConnectionDoctor() {
+  const [rows, setRows] = useState(null)
+  const [running, setRunning] = useState(false)
+
+  async function run() {
+    setRows([])
+    setRunning(true)
+    try {
+      await runConnectionDoctor((row) => setRows((prev) => [...(prev ?? []), row]))
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  async function copySummary() {
+    try {
+      await navigator.clipboard.writeText(summarizeDoctor(rows))
+      toast('Report copied — paste it anywhere.', { kind: 'success' })
+    } catch {
+      toast('Could not copy to clipboard.', { kind: 'error' })
+    }
+  }
+
+  return (
+    <div>
+      <p className="mb-1 text-sm font-medium">Connection doctor</p>
+      <p className="mb-4 text-xs text-muted">
+        Tests every source and relay from THIS device and tells the two failure layers apart:
+        “reach ✗” means your network/ISP blocks the host (VPN territory) · “cors ✗” means the
+        host is up but forbids browser access (relay territory).
+      </p>
+      <div className="mb-4 flex gap-3">
+        <Button variant="primary" size="sm" onClick={run} disabled={running}>
+          {running ? 'Testing…' : 'Run test'}
+        </Button>
+        {rows?.length > 0 && !running && (
+          <Button size="sm" onClick={copySummary}>
+            Copy report
+          </Button>
+        )}
+      </div>
+      {rows && (
+        <ul className="space-y-1.5">
+          {rows.map((row) => (
+            <li key={row.name} className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="w-40 font-medium">{row.name}</span>
+              <span className={clsx('stamp', row.reach.ok ? 'stamp-accent' : 'opacity-60')}>
+                {row.reach.ok ? `reach ✓ ${row.reach.ms}ms` : `reach ✗ ${row.reach.note ?? ''}`}
+              </span>
+              {row.cors && (
+                <span className={clsx('stamp', row.cors.ok ? 'stamp-accent' : 'opacity-60')}>
+                  {row.cors.ok
+                    ? `cors ✓ ${row.cors.status}`
+                    : `cors ✗ ${row.cors.status ?? row.cors.note ?? ''}`}
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }

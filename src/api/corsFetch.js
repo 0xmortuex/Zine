@@ -39,21 +39,36 @@ const COOLDOWN_MS = { rateLimit: 90_000, blockPage: 300_000, network: 30_000 }
  */
 export const PUBLIC_RELAYS = [
   {
-    name: 'allorigins',
-    wrap: (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+    // Jina's reader (r.jina.ai): fast, funded, CORS-open, and its fetcher
+    // passes bot-walls that block datacenter IPs. Probed 2026-07: 200 in
+    // 0.6s wrapping MangaDex. Keyless tier is rate-limited (~20 req/min) —
+    // our caching/pacing stays well under it.
+    name: 'jina-reader',
+    wrap: (url) => `https://r.jina.ai/${url}`,
+    unwrap: (envelope) => {
+      if (envelope?.code !== 200 || typeof envelope?.data?.content !== 'string') {
+        throw new Error('jina envelope error')
+      }
+      return { status: 200, body: JSON.parse(envelope.data.content) }
+    },
   },
   {
-    name: 'codetabs',
-    wrap: (url) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
-  },
-  {
-    // allorigins' JSON envelope endpoint — different code path server-side.
+    // allorigins' JSON envelope endpoint — probed working (its /raw
+    // sibling was 522ing), ~8s latency but reliable.
     name: 'allorigins-json',
     wrap: (url) => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
     unwrap: (envelope) => ({
       status: envelope?.status?.http_code ?? 200,
       body: JSON.parse(envelope?.contents ?? ''),
     }),
+  },
+  {
+    name: 'allorigins-raw',
+    wrap: (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  },
+  {
+    name: 'codetabs',
+    wrap: (url) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
   },
 ]
 
@@ -195,6 +210,12 @@ async function relayFetch(index, directUrl, externalSignal) {
   }
 }
 
+/**
+ * Staggered race: the first (fastest-known) relay fires immediately;
+ * backups join only if it hasn't answered within 2.5s. Wastes no quota
+ * on the slow relays when the primary is healthy, still converges on
+ * whatever works when it isn't.
+ */
 function raceRelays(directUrl, indexes) {
   const controllers = indexes.map(() => new AbortController())
   const origin = new URL(directUrl).origin
@@ -202,27 +223,35 @@ function raceRelays(directUrl, indexes) {
     let pending = indexes.length
     let lastError = null
     let settled = false
+    const timers = []
     indexes.forEach((relayIndex, i) => {
-      relayFetch(relayIndex, directUrl, controllers[i].signal).then(
-        (result) => {
-          if (settled) return
-          settled = true
-          winnerByOrigin.set(origin, relayIndex)
-          saveState()
-          controllers.forEach((c, j) => j !== i && c.abort())
-          resolve(result)
-        },
-        (err) => {
-          if (settled) return
-          lastError = err
-          if (--pending === 0) {
+      const start = () =>
+        relayFetch(relayIndex, directUrl, controllers[i].signal).then(
+          (result) => {
+            if (settled) return
             settled = true
-            reject(
-              new MangaDexError(RELAYS_DOWN_MESSAGE, { network: true, detail: lastError?.detail }),
-            )
-          }
-        },
-      )
+            winnerByOrigin.set(origin, relayIndex)
+            saveState()
+            timers.forEach(clearTimeout)
+            controllers.forEach((c, j) => j !== i && c.abort())
+            resolve(result)
+          },
+          (err) => {
+            if (settled) return
+            lastError = err
+            if (--pending === 0) {
+              settled = true
+              reject(
+                new MangaDexError(RELAYS_DOWN_MESSAGE, {
+                  network: true,
+                  detail: lastError?.detail,
+                }),
+              )
+            }
+          },
+        )
+      if (i === 0) start()
+      else timers.push(setTimeout(() => !settled && start(), 2500 + (i - 1) * 750))
     })
   })
 }

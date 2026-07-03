@@ -20,6 +20,7 @@ import {
   getComickChapterPages,
   getComickTop,
 } from './comick'
+import { getJikanPopular, getJikanTrending } from './jikan'
 import {
   isLocalId,
   getLocalManga,
@@ -94,30 +95,36 @@ export async function searchManga(title, opts = {}) {
  * /top lists as fallback when MangaDex is unreachable. Resolves [] instead
  * of throwing — the homepage hides empty rails rather than erroring.
  */
-export async function getPopularManga(opts) {
-  if (USING_FIXTURES) return api.getPopularManga(opts)
-  try {
-    return await real.getPopularManga(opts)
-  } catch {
+async function firstNonEmpty(attempts) {
+  for (const attempt of attempts) {
     try {
-      return (await getComickTop()).popular.slice(0, opts?.limit ?? 12)
+      const items = await attempt()
+      if (items?.length > 0) return items
     } catch {
-      return []
+      /* try the next tier */
     }
   }
+  return []
 }
 
-export async function getTrendingManga(opts) {
+export function getPopularManga(opts) {
+  if (USING_FIXTURES) return api.getPopularManga(opts)
+  const limit = opts?.limit ?? 12
+  return firstNonEmpty([
+    () => real.getPopularManga(opts),
+    async () => (await getComickTop()).popular.slice(0, limit),
+    () => getJikanPopular(limit),
+  ])
+}
+
+export function getTrendingManga(opts) {
   if (USING_FIXTURES) return api.getTrendingManga(opts)
-  try {
-    return await real.getTrendingManga(opts)
-  } catch {
-    try {
-      return (await getComickTop()).trending.slice(0, opts?.limit ?? 12)
-    } catch {
-      return []
-    }
-  }
+  const limit = opts?.limit ?? 12
+  return firstNonEmpty([
+    () => real.getTrendingManga(opts),
+    async () => (await getComickTop()).trending.slice(0, limit),
+    () => getJikanTrending(limit),
+  ])
 }
 
 export async function getManga(mangaId) {
