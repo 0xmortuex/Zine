@@ -46,10 +46,15 @@ export const PUBLIC_RELAYS = [
     name: 'jina-reader',
     wrap: (url) => `https://r.jina.ai/${url}`,
     unwrap: (envelope) => {
+      // Verified envelope shape: { code, status, data: { content,
+      // httpStatus, ... } } where content is the upstream body verbatim.
       if (envelope?.code !== 200 || typeof envelope?.data?.content !== 'string') {
         throw new Error('jina envelope error')
       }
-      return { status: 200, body: JSON.parse(envelope.data.content) }
+      return {
+        status: envelope.data.httpStatus ?? 200,
+        body: JSON.parse(envelope.data.content),
+      }
     },
   },
   {

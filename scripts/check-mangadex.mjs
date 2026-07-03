@@ -149,6 +149,36 @@ console.log('getChapter ok')
   assert.deepEqual(hosts(), ['api.allorigins.win'], 'sticky block → remembered relay only')
   console.log('sticky CORS block + relay memory ok')
 
+  // Primary relay: jina's envelope (shape verified against the live
+  // service 2026-07) must unwrap into the upstream JSON, carrying the
+  // real upstream HTTP status.
+  __resetApiState()
+  globalThis.fetch = async (url) => {
+    if (url.startsWith('https://api.mangadex.org')) throw new TypeError('Failed to fetch')
+    if (url.startsWith('https://r.jina.ai/')) {
+      return Response.json({
+        code: 200,
+        status: 20000,
+        meta: {},
+        data: {
+          title: '',
+          description: '',
+          url: 'https://api.mangadex.org/chapter/cj1',
+          httpStatus: 200,
+          content: JSON.stringify({
+            result: 'ok',
+            data: { ...feedItem(0), id: 'cj1', relationships: [{ id: 'm1', type: 'manga' }] },
+          }),
+          usage: {},
+        },
+      })
+    }
+    throw new TypeError('Failed to fetch')
+  }
+  const viaJina = await getChapter('cj1')
+  assert.equal(viaJina.mangaId, 'm1')
+  console.log('jina envelope unwrap ok')
+
   // 3. Remembered relay dies → re-race, another eligible relay takes over.
   __resetApiState()
   attempts.length = 0
