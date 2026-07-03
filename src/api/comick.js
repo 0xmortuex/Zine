@@ -13,7 +13,9 @@
  */
 import { fetchJsonResilient, MangaDexError } from './corsFetch.js'
 
-const API_BASE = 'https://api.comick.fun'
+// Comick has moved API domains over its lifetime; try both, remember the
+// one that answers for the rest of the session.
+const API_BASES = ['https://api.comick.fun', 'https://api.comick.io']
 const IMG_BASE = 'https://meo.comick.pictures'
 
 export const COMICK_PREFIX = 'ck:'
@@ -21,19 +23,35 @@ export const isComickId = (id) => typeof id === 'string' && id.startsWith(COMICK
 const hidOf = (id) => id.slice(COMICK_PREFIX.length)
 
 const responseCache = new Map()
+let baseIndex = 0
 
 async function request(pathAndQuery, ttlMs = 10 * 60_000) {
   const cached = responseCache.get(pathAndQuery)
   if (cached && cached.expires > Date.now()) return cached.body
-  const { status, body, statusText } = await fetchJsonResilient(`${API_BASE}${pathAndQuery}`)
-  if (status === 429) {
-    throw new MangaDexError('Rate limited by Comick — slow down and retry shortly', { status })
+
+  let lastError = null
+  for (let i = 0; i < API_BASES.length; i++) {
+    const index = (baseIndex + i) % API_BASES.length
+    try {
+      const { status, body, statusText } = await fetchJsonResilient(
+        `${API_BASES[index]}${pathAndQuery}`,
+      )
+      if (status === 429) {
+        throw new MangaDexError('Rate limited by Comick — slow down and retry shortly', { status })
+      }
+      if (!body || status >= 400) {
+        lastError = new MangaDexError(`Comick request failed: ${statusText || status}`, { status })
+        continue // this host answered garbage — try the alternate domain
+      }
+      baseIndex = index
+      if (ttlMs > 0) responseCache.set(pathAndQuery, { body, expires: Date.now() + ttlMs })
+      return body
+    } catch (err) {
+      if (err.status === 429) throw err
+      lastError = err // unreachable through every path — try the alternate domain
+    }
   }
-  if (!body || status >= 400) {
-    throw new MangaDexError(`Comick request failed: ${statusText || status}`, { status })
-  }
-  if (ttlMs > 0) responseCache.set(pathAndQuery, { body, expires: Date.now() + ttlMs })
-  return body
+  throw lastError
 }
 
 const STATUS = { 1: 'ongoing', 2: 'completed', 3: 'cancelled', 4: 'hiatus' }

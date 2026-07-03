@@ -77,7 +77,7 @@ export default function HomePage() {
 /* --------------------------------- search -------------------------------- */
 
 function SearchTab() {
-  const { query, items, total, loading, loadingMore, error, search, loadMore, hasMore } =
+  const { query, items, loading, loadingMore, error, search, loadMore, hasMore } =
     useMangaSearch()
   const [input, setInput] = useState('')
   const [params] = useSearchParams()
@@ -122,7 +122,7 @@ function SearchTab() {
         </Button>
       </form>
 
-      {loading && <SkeletonGrid />}
+      {loading && !items && <SkeletonGrid />}
 
       {error && !loading && <ErrorState error={error} onRetry={() => search(query)} />}
 
@@ -134,15 +134,16 @@ function SearchTab() {
         />
       )}
 
-      {!loading && !error && items?.length > 0 && (
+      {items?.length > 0 && !error && (
         <>
           <motion.p
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             className="mb-6 text-[0.65rem] font-semibold tracking-[0.2em] text-muted uppercase"
           >
-            <span className="tnum">{total}</span> results · showing{' '}
-            <span className="tnum">{items.length}</span>
+            showing <span className="tnum">{items.length}</span>
+            {hasMore && '+'} results
+            {loading && <span className="ml-2 normal-case">· still searching other sources…</span>}
           </motion.p>
           <MangaGrid items={items} />
           {hasMore && (

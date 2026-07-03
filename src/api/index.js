@@ -21,6 +21,7 @@ import {
   getComickTop,
 } from './comick'
 import { getJikanPopular, getJikanTrending } from './jikan'
+import { streamSearch } from './searchStream'
 import {
   isLocalId,
   getLocalManga,
@@ -37,7 +38,7 @@ export const USING_FIXTURES = Boolean(import.meta.env.VITE_USE_FIXTURES)
 export { MangaDexError } from './mangadex'
 export const { coverUrl } = api
 
-const SEARCH_SOURCE_TIMEOUT_MS = 20_000
+const SEARCH_SOURCE_TIMEOUT_MS = 12_000
 
 const withTimeout = (promise, ms) =>
   Promise.race([
@@ -45,49 +46,54 @@ const withTimeout = (promise, ms) =>
     new Promise((_, reject) => setTimeout(() => reject(new Error('source timed out')), ms)),
   ])
 
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
 /**
- * Query every online source in parallel and merge whatever answers —
- * near-duplicates (same normalized title) keep the first source's entry.
- * Throws only when ALL sources fail, with the primary source's error.
+ * Streaming search: each source's results are pushed via onBatch the
+ * moment that source answers — never waiting for the slowest or a dead
+ * source. Duplicates collapse by title, first arrival wins. Resolves
+ * { partial } once all sources settle; throws only if every source failed.
  */
-export async function searchManga(title, opts = {}) {
-  if (USING_FIXTURES) return api.searchManga(title, opts)
-
-  // Comick starts 400ms behind so the two discovery relay-races don't
-  // slam the shared relay pool at the exact same instant.
-  const comickDelayed = new Promise((resolve) => setTimeout(resolve, 400)).then(() =>
-    searchComick(title, { limit: opts.limit }),
-  )
-  const attempts = await Promise.allSettled([
-    withTimeout(real.searchManga(title, opts), SEARCH_SOURCE_TIMEOUT_MS),
-    withTimeout(comickDelayed, SEARCH_SOURCE_TIMEOUT_MS),
-  ])
-
-  const [mangadex, comick] = attempts
-  if (mangadex.status === 'rejected' && comick.status === 'rejected') {
-    throw mangadex.reason
+export async function searchMangaStream(title, opts = {}, onBatch) {
+  if (USING_FIXTURES) {
+    const result = await api.searchManga(title, opts)
+    onBatch(result.items, { total: result.total, source: 'fixtures' })
+    return { partial: false }
   }
+  return streamSearch(
+    [
+      () =>
+        withTimeout(real.searchManga(title, opts), SEARCH_SOURCE_TIMEOUT_MS).then((r) => ({
+          ...r,
+          source: 'mangadex',
+        })),
+      // Comick starts 400ms behind so the two discovery relay-races don't
+      // slam the shared relay pool at the exact same instant.
+      () =>
+        withTimeout(
+          delay(400).then(() => searchComick(title, { limit: opts.limit })),
+          SEARCH_SOURCE_TIMEOUT_MS,
+        ).then((r) => ({ ...r, source: 'comick' })),
+    ],
+    onBatch,
+  )
+}
 
-  const seenTitles = new Set()
+/** Offset pagination for "load more" — MangaDex only (Comick is single-shot). */
+export function searchMangaMore(title, opts = {}) {
+  if (USING_FIXTURES) return api.searchManga(title, opts)
+  return real.searchManga(title, opts)
+}
+
+/** Aggregating wrapper for non-streaming callers. */
+export async function searchManga(title, opts = {}) {
   const items = []
   let total = 0
-  for (const attempt of attempts) {
-    if (attempt.status !== 'fulfilled') continue
-    total += attempt.value.total ?? attempt.value.items.length
-    for (const manga of attempt.value.items) {
-      const key = manga.title.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
-      if (seenTitles.has(key)) continue
-      seenTitles.add(key)
-      items.push(manga)
-    }
-  }
-  return {
-    items,
-    total,
-    limit: opts.limit ?? items.length,
-    offset: opts.offset ?? 0,
-    partial: attempts.some((a) => a.status === 'rejected'),
-  }
+  const { partial } = await searchMangaStream(title, opts, (batch, meta) => {
+    items.push(...batch)
+    total += meta.total ?? batch.length
+  })
+  return { items, total, limit: opts.limit ?? items.length, offset: opts.offset ?? 0, partial }
 }
 
 /**
