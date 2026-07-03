@@ -82,7 +82,7 @@ const chapter = await getChapter('ch-0')
 assert.equal(chapter.mangaId, 'manga-xyz')
 console.log('getChapter ok')
 
-// --- CORS handling: public-relay fallback on network error (browser only) ---
+// --- CORS handling: relay race fallback on network error (browser only) ---
 {
   globalThis.window = {} // simulate a browser
   globalThis.localStorage = {
@@ -92,61 +92,63 @@ console.log('getChapter ok')
     },
   }
 
+  const okBody = () =>
+    new Response(JSON.stringify({ result: 'ok', data: { ...feedItem(0), relationships: [] } }), {
+      status: 200,
+    })
   const attempts = []
+
+  // Direct CORS-fails → all relays race; only allorigins/raw answers.
   globalThis.fetch = async (url) => {
     attempts.push(url)
     if (url.startsWith('https://api.mangadex.org')) {
       throw new TypeError('Failed to fetch') // what a CORS block looks like
     }
-    assert.ok(url.startsWith('https://api.allorigins.win/raw?url='))
-    return new Response(
-      JSON.stringify({ result: 'ok', data: { ...feedItem(0), relationships: [] } }),
-      { status: 200 },
-    )
+    if (url.startsWith('https://api.allorigins.win/raw?url=')) return okBody()
+    throw new TypeError('Failed to fetch') // every other relay is down
   }
-
   const viaRelay = await getChapter('ch-0')
   assert.equal(viaRelay.id, 'ch-0')
-  assert.equal(attempts.length, 2)
+  const hosts = attempts.map((u) => new URL(u).host)
+  assert.equal(hosts[0], 'api.mangadex.org', 'direct attempt comes first')
+  assert.ok(hosts.includes('api.allorigins.win'), 'relays raced')
   assert.ok(
-    decodeURIComponent(attempts[1]).includes('https://api.mangadex.org/chapter/ch-0'),
+    decodeURIComponent(attempts.find((u) => u.includes('/raw?url='))).includes(
+      'https://api.mangadex.org/chapter/ch-0',
+    ),
     'relay URL should wrap the direct API URL',
   )
-  console.log('public-relay CORS fallback ok')
+  console.log('relay race fallback ok')
 
-  // --- relay failover: first relay down → second relay serves; the working
-  // relay is remembered and the (already failed) direct call is skipped ---
+  // Winner is remembered: next request goes straight to it, no direct, no race.
+  attempts.length = 0
+  await getChapter('ch-0')
+  assert.deepEqual(
+    attempts.map((u) => new URL(u).host),
+    ['api.allorigins.win'],
+    'winning relay should be remembered',
+  )
+  console.log('relay memory ok')
+
+  // Winner dies → re-race, another relay takes over.
   attempts.length = 0
   globalThis.fetch = async (url) => {
     attempts.push(url)
-    if (url.startsWith('https://api.mangadex.org')) {
-      throw new TypeError('Failed to fetch')
-    }
-    if (url.startsWith('https://api.allorigins.win')) {
-      throw new TypeError('Failed to fetch') // relay 1 down
-    }
-    assert.ok(url.startsWith('https://corsproxy.io/?url='))
-    return new Response(
-      JSON.stringify({ result: 'ok', data: { ...feedItem(0), relationships: [] } }),
-      { status: 200 },
-    )
+    if (url.startsWith('https://api.codetabs.com')) return okBody()
+    throw new TypeError('Failed to fetch')
   }
-  await getChapter('ch-0')
-  // direct already known-blocked from the previous test → relay-first
-  assert.deepEqual(
-    attempts.map((u) => new URL(u).host),
-    ['api.allorigins.win', 'corsproxy.io'],
-  )
+  const viaFailover = await getChapter('ch-0')
+  assert.equal(viaFailover.id, 'ch-0')
   attempts.length = 0
   await getChapter('ch-0')
   assert.deepEqual(
     attempts.map((u) => new URL(u).host),
-    ['corsproxy.io'],
-    'working relay should be remembered',
+    ['api.codetabs.com'],
+    'failover winner should be remembered',
   )
-  console.log('relay failover + memory ok')
+  console.log('relay failover ok')
 
-  // --- a real API error through a relay is NOT retried on other relays ---
+  // A real API error through the remembered relay is authoritative.
   attempts.length = 0
   globalThis.fetch = async (url) => {
     attempts.push(url)
@@ -158,6 +160,15 @@ console.log('getChapter ok')
   await assert.rejects(() => getChapter('nope'), /Chapter not found/)
   assert.equal(attempts.length, 1, 'upstream 404 must not be retried across relays')
   console.log('upstream error passthrough ok')
+
+  // Everything down → single clear, actionable error.
+  attempts.length = 0
+  globalThis.fetch = async (url) => {
+    attempts.push(url)
+    throw new TypeError('Failed to fetch')
+  }
+  await assert.rejects(() => getChapter('ch-0'), /public relay|API proxy/i)
+  console.log('all-relays-down message ok')
 
   // --- user-configured proxy takes priority, no relay retry ---
   globalThis.localStorage.store['zine-settings'] = JSON.stringify({

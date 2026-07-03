@@ -21,19 +21,48 @@ const COVER_BASE = 'https://uploads.mangadex.org/covers'
  * opaque network errors. Escape hatches, in priority order:
  *   1. A user-configured proxy (Settings → Content → API proxy), for
  *      anyone who wants a private relay (see cors-proxy/worker.js).
- *   2. Zero-setup fallback: a chain of public CORS relays, tried in order
- *      until one answers. The working relay is remembered for the session,
- *      and once a direct call has CORS-failed we go relay-first instead of
- *      re-paying the failed direct attempt on every request.
+ *   2. Zero-setup fallback: public CORS relays. Every attempt carries a
+ *      hard timeout (public relays hang more often than they error), the
+ *      first discovery RACES all relays in parallel and the first valid
+ *      answer wins, the winner is remembered for the session, and once a
+ *      direct call has CORS-failed we go relay-first instead of re-paying
+ *      the failed direct attempt on every request.
  */
+const DIRECT_TIMEOUT_MS = 8_000
+const RELAY_TIMEOUT_MS = 15_000
+
 const PUBLIC_RELAYS = [
-  (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-  (url) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
-  (url) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+  {
+    name: 'allorigins',
+    wrap: (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  },
+  {
+    name: 'codetabs',
+    wrap: (url) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+  },
+  {
+    name: 'corsproxy',
+    wrap: (url) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
+  },
+  {
+    // allorigins' JSON envelope endpoint — different code path on their
+    // side, so it often works when /raw is struggling.
+    name: 'allorigins-json',
+    wrap: (url) => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
+    unwrap: (envelope) => ({
+      status: envelope?.status?.http_code ?? 200,
+      body: JSON.parse(envelope?.contents ?? ''),
+    }),
+  },
 ]
 
+const RELAYS_DOWN_MESSAGE =
+  'Could not reach MangaDex: the direct connection is blocked (CORS or network) and no public ' +
+  'relay responded. If this keeps happening, your network may be blocking MangaDex — try a ' +
+  'VPN, or set a personal API proxy in Settings → Content.'
+
 let corsBlocked = false // a direct call failed at the network level this session
-let workingRelay = 0 // index of the last relay that answered
+let workingRelay = null // index of the relay that won the race, if any
 
 function userProxyBase() {
   try {
@@ -78,49 +107,134 @@ function buildQuery(params = {}) {
   return s ? `?${s}` : ''
 }
 
-async function doFetch(url) {
+/** Timeout signal, optionally combined with an external abort (relay race). */
+function makeSignal(timeoutMs, external) {
+  const timeout = AbortSignal.timeout?.(timeoutMs)
+  if (timeout && external && AbortSignal.any) return AbortSignal.any([timeout, external])
+  return external ?? timeout
+}
+
+/** Fetch + JSON parse. Network-level failures (incl. timeouts) throw with network: true. */
+async function rawFetch(url, timeoutMs, externalSignal) {
   let res
   try {
-    res = await fetch(url, { headers: { Accept: 'application/json' } })
+    res = await fetch(url, {
+      headers: { Accept: 'application/json' },
+      signal: makeSignal(timeoutMs, externalSignal),
+    })
   } catch (err) {
     throw new MangaDexError('Network error reaching MangaDex', {
       detail: err.message,
       network: true,
     })
   }
+  const body = await res.json().catch(() => null)
+  return { res, body }
+}
 
-  if (res.status === 429) {
+/** Turn a (status, parsed body) pair into a result or a typed error. */
+function validate(status, body, statusText = '') {
+  if (status === 429) {
     throw new MangaDexError('Rate limited by MangaDex — slow down and retry shortly', {
       status: 429,
     })
   }
-
-  const body = await res.json().catch(() => null)
-  if (!res.ok || !body || body.result === 'error') {
-    const detail = body?.errors?.[0]?.detail ?? (body ? res.statusText : 'Invalid JSON response')
-    throw new MangaDexError(`MangaDex request failed: ${detail}`, {
-      status: res.status,
-      detail,
-    })
+  if (!body || status >= 400 || body.result === 'error') {
+    const detail = body?.errors?.[0]?.detail ?? (body ? statusText : 'Invalid JSON response')
+    throw new MangaDexError(`MangaDex request failed: ${detail}`, { status, detail })
   }
   return body
+}
+
+async function directFetch(url, timeoutMs = DIRECT_TIMEOUT_MS) {
+  const { res, body } = await rawFetch(url, timeoutMs)
+  return validate(res.status, body, res.statusText)
 }
 
 /** Genuine upstream API errors shouldn't be retried on another relay. */
 const isUpstreamApiError = (err) =>
   err instanceof MangaDexError && err.status >= 400 && err.status < 500 && err.status !== 429
 
+async function relayFetch(relay, directUrl, externalSignal) {
+  const { res, body } = await rawFetch(relay.wrap(directUrl), RELAY_TIMEOUT_MS, externalSignal)
+  let status = res.status
+  let payload = body
+  if (relay.unwrap) {
+    let inner
+    try {
+      inner = relay.unwrap(body)
+    } catch {
+      throw new MangaDexError(`Relay ${relay.name} returned an invalid envelope`, { network: true })
+    }
+    status = inner.status
+    payload = inner.body
+  }
+  try {
+    return validate(status, payload, res.statusText)
+  } catch (err) {
+    // A 429 here is usually the relay's own rate limit, not MangaDex's —
+    // treat it as a relay failure so the race can move on.
+    if (err.status === 429) {
+      throw new MangaDexError(`Relay ${relay.name} rate-limited`, { network: true })
+    }
+    throw err
+  }
+}
+
+/**
+ * Race every public relay; first valid answer wins and is remembered.
+ * An authoritative MangaDex error (4xx through a relay) rejects
+ * immediately — the other relays would only repeat it.
+ */
+function raceRelays(directUrl) {
+  const controllers = PUBLIC_RELAYS.map(() => new AbortController())
+  return new Promise((resolve, reject) => {
+    let pending = PUBLIC_RELAYS.length
+    let lastError = null
+    let settled = false
+
+    PUBLIC_RELAYS.forEach((relay, index) => {
+      relayFetch(relay, directUrl, controllers[index].signal).then(
+        (body) => {
+          if (settled) return
+          settled = true
+          workingRelay = index
+          controllers.forEach((c, j) => j !== index && c.abort())
+          resolve(body)
+        },
+        (err) => {
+          if (settled) return
+          if (isUpstreamApiError(err)) {
+            settled = true
+            controllers.forEach((c, j) => j !== index && c.abort())
+            reject(err)
+            return
+          }
+          lastError = err
+          if (--pending === 0) {
+            settled = true
+            reject(new MangaDexError(RELAYS_DOWN_MESSAGE, { network: true, detail: lastError?.detail }))
+          }
+        },
+      )
+    })
+  })
+}
+
 async function request(path, params) {
   const pathAndQuery = `${path}${buildQuery(params)}`
   const proxy = userProxyBase()
-  if (proxy) return doFetch(`${proxy}${pathAndQuery}`)
+  if (proxy) {
+    const { res, body } = await rawFetch(`${proxy}${pathAndQuery}`, RELAY_TIMEOUT_MS)
+    return validate(res.status, body, res.statusText)
+  }
 
   const directUrl = `${API_BASE}${pathAndQuery}`
   const isBrowser = typeof window !== 'undefined'
 
   if (!isBrowser || !corsBlocked) {
     try {
-      return await doFetch(directUrl)
+      return await directFetch(directUrl)
     } catch (err) {
       // A network-level failure on a direct browser call is almost always
       // the CORS block — fall through to the public relays. Anything else
@@ -130,19 +244,17 @@ async function request(path, params) {
     }
   }
 
-  let lastError
-  for (let i = 0; i < PUBLIC_RELAYS.length; i++) {
-    const index = (workingRelay + i) % PUBLIC_RELAYS.length
+  // Steady state: reuse the relay that won the race; on failure, re-race.
+  if (workingRelay != null) {
     try {
-      const body = await doFetch(PUBLIC_RELAYS[index](directUrl))
-      workingRelay = index
-      return body
+      return await relayFetch(PUBLIC_RELAYS[workingRelay], directUrl)
     } catch (err) {
-      if (isUpstreamApiError(err)) throw err // MangaDex answered through the relay
-      lastError = err // relay itself is down/blocked/mangling — try the next
+      if (isUpstreamApiError(err)) throw err
+      workingRelay = null
     }
   }
-  throw lastError
+
+  return raceRelays(directUrl)
 }
 
 /** Pick a display string from MangaDex's localized-string maps ({ en: "...", ja: "..." }). */
