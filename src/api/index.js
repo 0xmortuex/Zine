@@ -18,6 +18,7 @@ import {
   getComickChaptersAll,
   getComickChapter,
   getComickChapterPages,
+  getComickTop,
 } from './comick'
 import {
   isLocalId,
@@ -85,6 +86,37 @@ export async function searchManga(title, opts = {}) {
     limit: opts.limit ?? items.length,
     offset: opts.offset ?? 0,
     partial: attempts.some((a) => a.status === 'rejected'),
+  }
+}
+
+/**
+ * Homepage rails. MangaDex first (its popularity data is richer); Comick's
+ * /top lists as fallback when MangaDex is unreachable. Resolves [] instead
+ * of throwing — the homepage hides empty rails rather than erroring.
+ */
+export async function getPopularManga(opts) {
+  if (USING_FIXTURES) return api.getPopularManga(opts)
+  try {
+    return await real.getPopularManga(opts)
+  } catch {
+    try {
+      return (await getComickTop()).popular.slice(0, opts?.limit ?? 12)
+    } catch {
+      return []
+    }
+  }
+}
+
+export async function getTrendingManga(opts) {
+  if (USING_FIXTURES) return api.getTrendingManga(opts)
+  try {
+    return await real.getTrendingManga(opts)
+  } catch {
+    try {
+      return (await getComickTop()).trending.slice(0, opts?.limit ?? 12)
+    } catch {
+      return []
+    }
   }
 }
 

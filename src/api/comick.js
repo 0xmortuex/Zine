@@ -113,6 +113,23 @@ export async function getComickChaptersAll(mangaId, { languages = ['en'] } = {},
   return items
 }
 
+/**
+ * Comick's trending/rank lists — fallback for the homepage rails when
+ * MangaDex is unreachable. Entries may carry hid or only a slug; the
+ * comic endpoints accept either.
+ */
+export async function getComickTop() {
+  const body = await request('/top?type=trending&comic_types=manga&accept_mature_content=false', 30 * 60_000)
+  const normalizeTop = (list) =>
+    (list ?? [])
+      .filter((entry) => entry && (entry.hid || entry.slug) && entry.title)
+      .map((entry) => normalizeComic({ ...entry, hid: entry.hid ?? entry.slug }))
+  return {
+    trending: normalizeTop(body?.trending?.[7] ?? body?.trending?.[30]),
+    popular: normalizeTop(body?.rank),
+  }
+}
+
 export async function getComickChapter(chapterId) {
   const body = await request(`/chapter/${hidOf(chapterId)}?tachiyomi=true`, 6 * 60 * 60_000)
   const ch = body?.chapter ?? body

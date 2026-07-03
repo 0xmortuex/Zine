@@ -299,6 +299,16 @@ export async function searchManga(title, { limit = 20, offset = 0 } = {}) {
   return { items, total: matches.length, limit, offset }
 }
 
+export async function getPopularManga({ limit = 12 } = {}) {
+  await sleep(LATENCY_MS)
+  return MANGA.slice(0, limit)
+}
+
+export async function getTrendingManga({ limit = 12 } = {}) {
+  await sleep(LATENCY_MS)
+  return [...MANGA].reverse().slice(0, limit)
+}
+
 export async function getManga(mangaId) {
   await sleep(LATENCY_MS)
   const manga = MANGA.find((m) => m.id === mangaId)

@@ -232,6 +232,40 @@ export async function searchManga(
   }
 }
 
+/** Most-followed manga on MangaDex — the "most popular" rail. */
+export async function getPopularManga({
+  limit = 12,
+  contentRatings = DEFAULT_CONTENT_RATINGS,
+  availableLanguages,
+} = {}) {
+  const body = await request('/manga', {
+    limit,
+    includes: ['cover_art'],
+    contentRating: contentRatings,
+    availableTranslatedLanguage: availableLanguages,
+    order: { followedCount: 'desc' },
+  })
+  return body.data.map(normalizeManga)
+}
+
+/** Heavily-followed manga created recently — the "trending" rail. */
+export async function getTrendingManga({
+  limit = 12,
+  contentRatings = DEFAULT_CONTENT_RATINGS,
+  availableLanguages,
+} = {}) {
+  const since = new Date(Date.now() - 90 * 86400_000).toISOString().slice(0, 19)
+  const body = await request('/manga', {
+    limit,
+    includes: ['cover_art'],
+    contentRating: contentRatings,
+    availableTranslatedLanguage: availableLanguages,
+    createdAtSince: since,
+    order: { followedCount: 'desc' },
+  })
+  return body.data.map(normalizeManga)
+}
+
 /** Fetch a single manga by id (with cover art resolved). */
 export async function getManga(mangaId) {
   const body = await request(`/manga/${mangaId}`, { includes: ['cover_art'] })

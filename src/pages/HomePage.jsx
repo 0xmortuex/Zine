@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { AnimatePresence, motion } from 'motion/react'
 import clsx from 'clsx'
@@ -11,8 +11,10 @@ import Button from '../components/ui/Button'
 import Icon from '../components/ui/Icon'
 import { useMangaSearch } from '../hooks/useMangaSearch'
 import { useLibrary } from '../store/useLibrary'
+import { useSettings } from '../store/useSettings'
 import { toast } from '../store/useToasts'
 import LocalShelf from '../components/LocalShelf'
+import { getPopularManga, getTrendingManga } from '../api'
 
 const TABS = [
   { id: 'search', label: 'browse', heading: 'browse.', sub: 'Search the MangaDex catalogue.' },
@@ -142,14 +144,60 @@ function SearchTab() {
         </>
       )}
 
-      {!loading && !error && items === null && (
+      {!loading && !error && items === null && <DiscoverRails />}
+    </>
+  )
+}
+
+/** "trending now." and "most popular." rails shown before any search. */
+function DiscoverRails() {
+  const languages = useSettings((s) => s.languages)
+  const readableOnly = useSettings((s) => s.readableOnly)
+  const contentRatings = useSettings((s) => s.contentRatings)
+  const [trending, setTrending] = useState(null)
+  const [popular, setPopular] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const opts = {
+      limit: 12,
+      contentRatings,
+      availableLanguages: readableOnly ? languages : undefined,
+    }
+    getTrendingManga(opts).then((items) => !cancelled && setTrending(items))
+    getPopularManga(opts).then((items) => !cancelled && setPopular(items))
+    return () => {
+      cancelled = true
+    }
+  }, [languages, readableOnly, contentRatings])
+
+  const failed = trending?.length === 0 && popular?.length === 0
+
+  return (
+    <>
+      <DiscoverSection title="trending now." items={trending} />
+      <DiscoverSection title="most popular." items={popular} />
+      {failed && (
         <EmptyState
           icon="book"
           title="Your index is open."
-          hint="Search for a title above to start filling the shelves."
+          hint="The discovery rails couldn't load right now — search for a title above, or retry in a minute."
         />
       )}
     </>
+  )
+}
+
+function DiscoverSection({ title, items }) {
+  if (items?.length === 0) return null
+  return (
+    <section className="mb-12">
+      <div className="mb-5 flex items-baseline gap-3">
+        <h3 className="text-display text-lg lowercase">{title}</h3>
+        <div className="rule-h flex-1 self-center" />
+      </div>
+      {items === null ? <SkeletonGrid count={6} /> : <MangaGrid items={items} />}
+    </section>
   )
 }
 

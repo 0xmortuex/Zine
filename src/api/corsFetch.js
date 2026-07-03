@@ -31,6 +31,12 @@ const RELAY_TIMEOUT_MS = 15_000
 const RELAY_MIN_GAP_MS = 300
 const COOLDOWN_MS = { rateLimit: 90_000, blockPage: 300_000, network: 30_000 }
 
+/**
+ * Only relays that verifiably still exist (probed 2026-07: corsproxy.io
+ * demands an API key, cors.eu.org / cors.lol / htmldriven are dead or
+ * rejecting). A short pool of real services beats a long pool of ghosts —
+ * dead entries just add seconds of timeout before every failure.
+ */
 export const PUBLIC_RELAYS = [
   {
     name: 'allorigins',
@@ -41,10 +47,6 @@ export const PUBLIC_RELAYS = [
     wrap: (url) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
   },
   {
-    name: 'corsproxy',
-    wrap: (url) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
-  },
-  {
     // allorigins' JSON envelope endpoint — different code path server-side.
     name: 'allorigins-json',
     wrap: (url) => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
@@ -52,19 +54,6 @@ export const PUBLIC_RELAYS = [
       status: envelope?.status?.http_code ?? 200,
       body: JSON.parse(envelope?.contents ?? ''),
     }),
-  },
-  {
-    name: 'cors-eu',
-    wrap: (url) => `https://cors.eu.org/${url}`,
-  },
-  {
-    name: 'cors-lol',
-    wrap: (url) => `https://api.cors.lol/?url=${encodeURIComponent(url)}`,
-  },
-  {
-    name: 'htmldriven',
-    wrap: (url) => `https://cors-proxy.htmldriven.com/?url=${encodeURIComponent(url)}`,
-    unwrap: (envelope) => ({ status: 200, body: JSON.parse(envelope?.body ?? '') }),
   },
 ]
 
@@ -80,8 +69,23 @@ export const RELAYS_COOLING_MESSAGE =
 /* ------------------------------ health state ------------------------------ */
 
 const STATE_KEY = 'zine:relay-state-v2'
-const blockedOrigins = new Set()
+// CORS-block marks are IN-MEMORY ONLY and expire: persisting them broke
+// recovery — turning a VPN on and refreshing kept skipping the (now
+// working) direct path for the whole session. Re-probing direct costs at
+// most one 4s timeout every couple of minutes.
+const BLOCK_TTL_MS = 2 * 60_000
+const blockedOriginsAt = new Map() // origin -> timestamp of last network failure
 const winnerByOrigin = new Map()
+
+const isBlocked = (origin) => {
+  const at = blockedOriginsAt.get(origin)
+  if (!at) return false
+  if (Date.now() - at > BLOCK_TTL_MS) {
+    blockedOriginsAt.delete(origin)
+    return false
+  }
+  return true
+}
 // Cooldowns are PER (upstream origin, relay): a relay that Comick's bot
 // protection block-pages may still be perfectly fine for MangaDex — one
 // misbehaving source must not poison the shared pool for the others.
@@ -94,7 +98,6 @@ const cooledUntil = (origin, index) => relayCooldownUntil.get(cooldownKey(origin
 function loadState() {
   try {
     const saved = JSON.parse(sessionStorage.getItem(STATE_KEY))
-    for (const origin of saved?.blocked ?? []) blockedOrigins.add(origin)
     for (const [origin, index] of Object.entries(saved?.winners ?? {})) {
       if (Number.isInteger(index)) winnerByOrigin.set(origin, index)
     }
@@ -107,10 +110,7 @@ function saveState() {
   try {
     sessionStorage.setItem(
       STATE_KEY,
-      JSON.stringify({
-        blocked: [...blockedOrigins],
-        winners: Object.fromEntries(winnerByOrigin),
-      }),
+      JSON.stringify({ winners: Object.fromEntries(winnerByOrigin) }),
     )
   } catch {
     /* storage unavailable */
@@ -120,12 +120,12 @@ function saveState() {
 if (typeof sessionStorage !== 'undefined') loadState()
 
 export function isCorsBlocked(origin) {
-  return blockedOrigins.has(origin)
+  return isBlocked(origin)
 }
 
 /** Test hook: reset all discovery/health state. */
 export function __resetCorsState() {
-  blockedOrigins.clear()
+  blockedOriginsAt.clear()
   winnerByOrigin.clear()
   relayCooldownUntil.clear()
   relayLastStart.fill(0)
@@ -237,7 +237,7 @@ export async function fetchJsonResilient(url, { skipRelays = false } = {}) {
   const origin = new URL(url).origin
   const isBrowser = typeof window !== 'undefined'
 
-  if (skipRelays || !isBrowser || !blockedOrigins.has(origin)) {
+  if (skipRelays || !isBrowser || !isBlocked(origin)) {
     try {
       const result = await rawFetch(url, skipRelays ? RELAY_TIMEOUT_MS : DIRECT_TIMEOUT_MS)
       // Parsed JSON of any status — and bodyless rate limits — are
@@ -246,8 +246,7 @@ export async function fetchJsonResilient(url, { skipRelays = false } = {}) {
       if (skipRelays || !isBrowser) return result
     } catch (err) {
       if (skipRelays || !isBrowser || !(err instanceof MangaDexError) || !err.network) throw err
-      blockedOrigins.add(origin)
-      saveState()
+      blockedOriginsAt.set(origin, Date.now())
     }
   }
 
