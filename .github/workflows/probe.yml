@@ -42,3 +42,16 @@ jobs:
           probe corsfix "https://proxy.corsfix.com/?$MD"
           probe jina-reader "https://r.jina.ai/$MD"
           probe whateverorigin "http://www.whateverorigin.org/get?url=$ENC_MD"
+
+          echo '--- jina envelope deep-dive: can data.content be JSON.parsed? ---'
+          curl -sS --max-time 25 -H 'Accept: application/json' -H "Origin: $ORIGIN" -A "$UA" \
+            "https://r.jina.ai/$MD" -o /tmp/jina.json || true
+          echo "envelope keys: $(jq -r 'keys | join(",")' /tmp/jina.json 2>/dev/null || echo 'NOT JSON')"
+          echo "data keys: $(jq -r '.data | keys | join(",")' /tmp/jina.json 2>/dev/null || echo '-')"
+          jq -r '.data.content // empty' /tmp/jina.json > /tmp/inner.json 2>/dev/null || true
+          echo "content head: $(head -c 250 /tmp/inner.json | tr '\n\r' '  ')"
+          if jq -e '.result' /tmp/inner.json > /dev/null 2>&1; then
+            echo "CONTENT PARSES AS JSON: result=$(jq -r '.result' /tmp/inner.json), entries=$(jq '.data | length' /tmp/inner.json)"
+          else
+            echo 'CONTENT DOES NOT PARSE AS JSON'
+          fi
