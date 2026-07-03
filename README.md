@@ -105,6 +105,18 @@ node scripts/check-chapters-lib.mjs  # dedupe/canonical/volume-grouping/prev-nex
 node scripts/check-autoplay.mjs      # autoplay stepper + preload window math
 ```
 
+## Local shelf (offline, no server)
+
+**Library → On device → Import** accepts `.cbz`/`.zip` chapter archives or
+loose image files. Imports are stored in the browser's IndexedDB and read
+with the full reader (autoplay included) with zero network involved — they
+survive reloads and work when MangaDex and the relays are unreachable.
+Each archive becomes one chapter (pages in natural filename order); more
+chapters can be added from the series page, which also has
+"Remove from device". Local series never touch any server, and the app
+never bundles or distributes manga content itself — you import your own
+files.
+
 ## MangaDex API and CORS (hosted deployments)
 
 MangaDex's API does not send CORS headers for third-party origins, so a

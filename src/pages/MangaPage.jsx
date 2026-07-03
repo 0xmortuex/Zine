@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { motion } from 'motion/react'
 import clsx from 'clsx'
@@ -19,11 +19,14 @@ import { useLibrary } from '../store/useLibrary'
 import { useSettings } from '../store/useSettings'
 import { toast } from '../store/useToasts'
 import { dedupeChapters, groupByVolume } from '../lib/chapters'
+import { importChapters, deleteLocalManga } from '../lib/localLibrary'
+import { invalidateChapters } from '../store/chapterCache'
 
 export default function MangaPage() {
   const { id } = useParams()
   const [manga, setManga] = useState(null)
   const [mangaError, setMangaError] = useState(null)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -36,7 +39,7 @@ export default function MangaPage() {
     return () => {
       cancelled = true
     }
-  }, [id])
+  }, [id, refreshKey])
 
   if (mangaError) {
     return (
@@ -57,8 +60,63 @@ export default function MangaPage() {
 
       {manga ? <Spread manga={manga} /> : <SkeletonDetailHero />}
 
-      {manga && <Chapters manga={manga} />}
+      {manga?.isLocal && (
+        <LocalControls manga={manga} onChanged={() => setRefreshKey((k) => k + 1)} />
+      )}
+
+      {manga && <Chapters key={refreshKey} manga={manga} />}
     </PageTransition>
+  )
+}
+
+/** Manage a locally imported series: add more chapters or remove it. */
+function LocalControls({ manga, onChanged }) {
+  const fileInput = useRef(null)
+  const [busy, setBusy] = useState(false)
+  const navigate = useNavigate()
+
+  async function handleFiles(event) {
+    const files = [...(event.target.files ?? [])]
+    event.target.value = ''
+    if (files.length === 0) return
+    setBusy(true)
+    try {
+      await importChapters(manga.title, files, manga.id)
+      invalidateChapters(manga.id)
+      toast('Chapters added to this device.', { kind: 'success' })
+      onChanged()
+    } catch (err) {
+      toast(`Import failed: ${err.message}`, { kind: 'error' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleDelete() {
+    await deleteLocalManga(manga.id)
+    invalidateChapters(manga.id)
+    toast('Removed from this device.')
+    navigate('/?tab=library')
+  }
+
+  return (
+    <div className="mb-10 flex flex-wrap items-center gap-3">
+      <span className="stamp stamp-accent">on device</span>
+      <Button size="sm" onClick={() => fileInput.current?.click()} disabled={busy}>
+        <Icon name="upload" size={14} /> {busy ? 'Importing…' : 'Add chapters'}
+      </Button>
+      <Button variant="danger" size="sm" onClick={handleDelete} disabled={busy}>
+        <Icon name="trash" size={14} /> Remove from device
+      </Button>
+      <input
+        ref={fileInput}
+        type="file"
+        accept=".cbz,.zip,image/*"
+        multiple
+        onChange={handleFiles}
+        className="hidden"
+      />
+    </div>
   )
 }
 

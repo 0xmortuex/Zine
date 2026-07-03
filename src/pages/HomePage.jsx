@@ -12,6 +12,7 @@ import Icon from '../components/ui/Icon'
 import { useMangaSearch } from '../hooks/useMangaSearch'
 import { useLibrary } from '../store/useLibrary'
 import { toast } from '../store/useToasts'
+import LocalShelf from '../components/LocalShelf'
 
 const TABS = [
   { id: 'search', label: 'browse', heading: 'browse.', sub: 'Search the MangaDex catalogue.' },
@@ -238,17 +239,26 @@ function LibraryTab() {
     .sort((a, b) => b.addedAt - a.addedAt)
     .map((f) => f.manga)
 
-  if (items.length === 0) {
-    return (
-      <EmptyState
-        icon="heart"
-        title="No favorites yet."
-        hint="Tap the heart on any series to shelve it here."
-      />
-    )
-  }
+  return (
+    <>
+      <LocalShelf />
 
-  return <MangaGrid items={items} />
+      <div className="mb-4 flex items-baseline gap-3">
+        <h3 className="text-display text-lg lowercase">favorites.</h3>
+        {items.length > 0 && <span className="tnum text-sm text-muted">{items.length}</span>}
+        <div className="rule-h flex-1 self-center" />
+      </div>
+      {items.length === 0 ? (
+        <EmptyState
+          icon="heart"
+          title="No favorites yet."
+          hint="Tap the heart on any series to shelve it here."
+        />
+      ) : (
+        <MangaGrid items={items} />
+      )}
+    </>
+  )
 }
 
 /* -------------------------------- history -------------------------------- */
