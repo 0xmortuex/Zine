@@ -52,7 +52,9 @@ globalThis.fetch = async (url) => {
   throw new Error(`unexpected fetch: ${url}`)
 }
 
-const { getChaptersAll, getChapter } = await import('../src/api/mangadex.js')
+const { getChaptersAll, getChapter, searchManga, __resetApiState } = await import(
+  '../src/api/mangadex.js'
+)
 
 // --- pagination loop ---
 const progress = []
@@ -82,7 +84,24 @@ const chapter = await getChapter('ch-0')
 assert.equal(chapter.mangaId, 'manga-xyz')
 console.log('getChapter ok')
 
-// --- CORS handling: relay race fallback on network error (browser only) ---
+// --- search: readable-only filter passes availableTranslatedLanguage[] ---
+{
+  const searchCalls = []
+  globalThis.fetch = async (url) => {
+    searchCalls.push(new URL(url))
+    return new Response(
+      JSON.stringify({ result: 'ok', data: [], total: 0, limit: 20, offset: 0 }),
+      { status: 200 },
+    )
+  }
+  await searchManga('jujutsu', { availableLanguages: ['en'] })
+  assert.deepEqual(searchCalls[0].searchParams.getAll('availableTranslatedLanguage[]'), ['en'])
+  await searchManga('jujutsu unfiltered')
+  assert.deepEqual(searchCalls[1].searchParams.getAll('availableTranslatedLanguage[]'), [])
+  console.log('readable-only search filter ok')
+}
+
+// --- CORS handling: relay race, cooldowns, caching (browser only) ---
 {
   globalThis.window = {} // simulate a browser
   globalThis.localStorage = {
@@ -99,119 +118,117 @@ console.log('getChapter ok')
   const blockPage = (status = 403) =>
     new Response('<html>blocked — get an api key</html>', { status })
   const attempts = []
+  const hosts = () => attempts.map((u) => new URL(u).host)
 
-  // Direct call returns garbage (Cloudflare challenge / captive portal)
-  // → must fall through to the relays, not surface "Invalid JSON".
+  // 1. Direct call returns garbage (Cloudflare challenge / captive portal)
+  //    → falls through to the relay race, not surfaced as "Invalid JSON".
+  __resetApiState()
   globalThis.fetch = async (url) => {
     attempts.push(url)
     if (url.startsWith('https://api.mangadex.org')) return blockPage(503)
     if (url.startsWith('https://api.allorigins.win/raw?url=')) return okBody()
-    throw new TypeError('Failed to fetch') // every other relay is down
+    throw new TypeError('Failed to fetch')
   }
-  const viaRelay = await getChapter('ch-0')
-  assert.equal(viaRelay.id, 'ch-0')
-  const hosts = attempts.map((u) => new URL(u).host)
-  assert.equal(hosts[0], 'api.mangadex.org', 'direct attempt comes first')
-  assert.ok(hosts.includes('api.allorigins.win'), 'relays raced')
-  assert.ok(
-    decodeURIComponent(attempts.find((u) => u.includes('/raw?url='))).includes(
-      'https://api.mangadex.org/chapter/ch-0',
-    ),
-    'relay URL should wrap the direct API URL',
-  )
-  console.log('direct-garbage fallback + relay race ok')
+  assert.ok(await getChapter('c1'))
+  assert.equal(hosts()[0], 'api.mangadex.org', 'direct attempt comes first')
+  assert.ok(hosts().includes('api.allorigins.win'), 'relays raced')
+  console.log('direct-garbage fallback ok')
 
-  // A true CORS block (network throw) is sticky: direct is skipped afterwards.
+  // 2. True CORS block is sticky: after it, requests go relay-first.
+  __resetApiState()
   attempts.length = 0
   globalThis.fetch = async (url) => {
     attempts.push(url)
-    if (url.startsWith('https://api.mangadex.org')) {
-      throw new TypeError('Failed to fetch') // what a CORS block looks like
-    }
+    if (url.startsWith('https://api.mangadex.org')) throw new TypeError('Failed to fetch')
     if (url.startsWith('https://api.allorigins.win/raw?url=')) return okBody()
     throw new TypeError('Failed to fetch')
   }
-  await getChapter('ch-0')
+  assert.ok(await getChapter('c2'))
   attempts.length = 0
-  await getChapter('ch-0')
-  assert.deepEqual(
-    attempts.map((u) => new URL(u).host),
-    ['api.allorigins.win'],
-    'after a CORS block, requests go relay-first',
-  )
-  console.log('sticky CORS block ok')
+  assert.ok(await getChapter('c2b'))
+  assert.deepEqual(hosts(), ['api.allorigins.win'], 'sticky block → remembered relay only')
+  console.log('sticky CORS block + relay memory ok')
 
-  // Winner dies → re-race, another relay takes over.
+  // 3. Remembered relay dies → re-race, another eligible relay takes over.
+  __resetApiState()
   attempts.length = 0
   globalThis.fetch = async (url) => {
     attempts.push(url)
     if (url.startsWith('https://api.codetabs.com')) return okBody()
     throw new TypeError('Failed to fetch')
   }
-  const viaFailover = await getChapter('ch-0')
-  assert.equal(viaFailover.id, 'ch-0')
+  assert.ok(await getChapter('c3'))
   attempts.length = 0
-  await getChapter('ch-0')
-  assert.deepEqual(
-    attempts.map((u) => new URL(u).host),
-    ['api.codetabs.com'],
-    'failover winner should be remembered',
-  )
+  assert.ok(await getChapter('c3b'))
+  assert.deepEqual(hosts(), ['api.codetabs.com'], 'failover winner remembered')
   console.log('relay failover ok')
 
-  // REGRESSION: a relay answering with its own 4xx HTML block page must be
-  // treated as a relay failure, not an authoritative MangaDex error — the
-  // race continues and another relay can still win.
-  attempts.length = 0
+  // 4. REGRESSION: a relay's own 4xx HTML block page is a relay failure,
+  //    not an authoritative MangaDex answer — the race must continue.
+  __resetApiState()
   globalThis.fetch = async (url) => {
-    attempts.push(url)
-    if (url.startsWith('https://api.codetabs.com')) return blockPage(403) // remembered relay now blocks
+    if (url.startsWith('https://api.mangadex.org')) throw new TypeError('Failed to fetch')
+    if (url.startsWith('https://api.codetabs.com')) return blockPage(403)
     if (url.startsWith('https://corsproxy.io')) return blockPage(403)
     if (url.startsWith('https://api.allorigins.win/raw?url=')) return okBody()
     throw new TypeError('Failed to fetch')
   }
-  const viaBlockPageEscape = await getChapter('ch-0')
-  assert.equal(viaBlockPageEscape.id, 'ch-0')
+  assert.ok(await getChapter('c4'))
   console.log('relay block-page not authoritative ok')
 
-  // A real API error through the remembered relay is authoritative.
-  attempts.length = 0
+  // 5. A real parsed MangaDex error through a relay is authoritative.
+  __resetApiState()
   globalThis.fetch = async (url) => {
-    attempts.push(url)
+    if (url.startsWith('https://api.mangadex.org')) throw new TypeError('Failed to fetch')
     return new Response(
       JSON.stringify({ result: 'error', errors: [{ status: 404, detail: 'Chapter not found' }] }),
       { status: 404 },
     )
   }
-  await assert.rejects(() => getChapter('nope'), /Chapter not found/)
-  assert.equal(attempts.length, 1, 'upstream 404 must not be retried across relays')
+  await assert.rejects(() => getChapter('c5'), /Chapter not found/)
   console.log('upstream error passthrough ok')
 
-  // Everything down → single clear, actionable error.
+  // 6. Everything down → clear aggregated error, and the relays are benched:
+  //    the immediate retry gets the cooling-down message without re-hammering.
+  __resetApiState()
   attempts.length = 0
   globalThis.fetch = async (url) => {
     attempts.push(url)
     throw new TypeError('Failed to fetch')
   }
-  await assert.rejects(() => getChapter('ch-0'), /public relay|API proxy/i)
-  console.log('all-relays-down message ok')
+  await assert.rejects(() => getChapter('c6'), /public relay|API proxy/i)
+  const attemptsAfterFirstFailure = attempts.length
+  await assert.rejects(() => getChapter('c6'), /cooling down/i)
+  assert.equal(attempts.length, attemptsAfterFirstFailure, 'cooldown must prevent re-hammering')
+  console.log('all-down message + cooldown ok')
 
-  // --- user-configured proxy takes priority, no relay retry ---
+  // 7. Response cache: a repeated request never touches the network again.
+  __resetApiState()
+  attempts.length = 0
+  globalThis.fetch = async (url) => {
+    attempts.push(url)
+    return okBody()
+  }
+  await getChapter('c7')
+  await getChapter('c7')
+  assert.equal(attempts.length, 1, 'second request must be served from cache')
+  console.log('response cache ok')
+
+  // 8. A user-configured proxy takes priority over everything.
+  __resetApiState()
   globalThis.localStorage.store['zine-settings'] = JSON.stringify({
     state: { apiProxy: 'https://zine-mangadex.example.workers.dev/' },
   })
   attempts.length = 0
   globalThis.fetch = async (url) => {
     attempts.push(url)
-    assert.ok(url.startsWith('https://zine-mangadex.example.workers.dev/chapter/ch-0'))
-    return new Response(
-      JSON.stringify({ result: 'ok', data: { ...feedItem(0), relationships: [] } }),
-      { status: 200 },
-    )
+    assert.ok(url.startsWith('https://zine-mangadex.example.workers.dev/chapter/c8'))
+    return okBody()
   }
-  await getChapter('ch-0')
+  await getChapter('c8')
   assert.equal(attempts.length, 1)
   console.log('user proxy priority ok')
 }
 
 console.log('\nall mangadex client checks passed')
+

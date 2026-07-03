@@ -35,6 +35,9 @@ export const useSettings = create(
 
       languages: ['en'],
       contentRatings: ['safe', 'suggestive'],
+      // Hide search results whose chapters exist only as external links
+      // (publisher-removed titles) — every listed book is readable in-app.
+      readableOnly: true,
 
       // Optional CORS proxy base URL for the MangaDex API (see
       // cors-proxy/worker.js). Empty = direct + public-relay fallback.
@@ -47,6 +50,7 @@ export const useSettings = create(
       setReader: (patch) => set((state) => ({ reader: { ...state.reader, ...patch } })),
       setLanguages: (languages) => set({ languages }),
       setContentRatings: (contentRatings) => set({ contentRatings }),
+      setReadableOnly: (readableOnly) => set({ readableOnly }),
       setApiProxy: (apiProxy) => set({ apiProxy }),
     }),
     { name: 'zine-settings' },

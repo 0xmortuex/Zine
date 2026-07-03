@@ -10,6 +10,9 @@ const PAGE_SIZE = 20
  */
 export function useMangaSearch() {
   const contentRatings = useSettings((s) => s.contentRatings)
+  const languages = useSettings((s) => s.languages)
+  const readableOnly = useSettings((s) => s.readableOnly)
+  const availableLanguages = readableOnly ? languages : undefined
   const [query, setQuery] = useState('')
   const [items, setItems] = useState(null)
   const [total, setTotal] = useState(0)
@@ -27,7 +30,7 @@ export function useMangaSearch() {
       setLoading(true)
       setError(null)
       try {
-        const result = await searchManga(q, { limit: PAGE_SIZE, contentRatings })
+        const result = await searchManga(q, { limit: PAGE_SIZE, contentRatings, availableLanguages })
         if (id !== requestId.current) return
         setItems(result.items)
         setTotal(result.total)
@@ -39,7 +42,7 @@ export function useMangaSearch() {
         if (id === requestId.current) setLoading(false)
       }
     },
-    [contentRatings],
+    [contentRatings, availableLanguages],
   )
 
   const loadMore = useCallback(async () => {
@@ -51,6 +54,7 @@ export function useMangaSearch() {
         limit: PAGE_SIZE,
         offset: items.length,
         contentRatings,
+        availableLanguages,
       })
       if (id !== requestId.current) return
       setItems((prev) => [...prev, ...result.items])
@@ -60,7 +64,7 @@ export function useMangaSearch() {
     } finally {
       if (id === requestId.current) setLoadingMore(false)
     }
-  }, [query, items, total, loadingMore, contentRatings])
+  }, [query, items, total, loadingMore, contentRatings, availableLanguages])
 
   const hasMore = Boolean(items && items.length < total)
 

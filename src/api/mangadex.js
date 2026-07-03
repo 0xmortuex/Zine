@@ -28,7 +28,7 @@ const COVER_BASE = 'https://uploads.mangadex.org/covers'
  *      direct call has CORS-failed we go relay-first instead of re-paying
  *      the failed direct attempt on every request.
  */
-const DIRECT_TIMEOUT_MS = 8_000
+const DIRECT_TIMEOUT_MS = 4_000
 const RELAY_TIMEOUT_MS = 15_000
 
 const PUBLIC_RELAYS = [
@@ -65,8 +65,47 @@ const RELAYS_DOWN_MESSAGE =
   'relay responded. If this keeps happening, your network may be blocking MangaDex — try a ' +
   'VPN, or set a personal API proxy in Settings → Content.'
 
+const RELAYS_COOLING_MESSAGE =
+  'The public relays are cooling down after failures or rate limits. Wait a minute and retry — ' +
+  'or set a personal API proxy in Settings → Content for an always-fast connection.'
+
+/* Relay health state, persisted for the session so reloads skip rediscovery. */
+const RELAY_STATE_KEY = 'zine:relay-state'
 let corsBlocked = false // a direct call failed at the network level this session
 let workingRelay = null // index of the relay that won the race, if any
+const relayCooldownUntil = PUBLIC_RELAYS.map(() => 0)
+const relayLastStart = PUBLIC_RELAYS.map(() => 0)
+
+/* How long to bench a relay after each failure mode. */
+const COOLDOWN_MS = { rateLimit: 90_000, blockPage: 300_000, network: 30_000 }
+const RELAY_MIN_GAP_MS = 300 // pacing between requests to the same relay
+
+function loadRelayState() {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(RELAY_STATE_KEY))
+    if (saved) {
+      corsBlocked = Boolean(saved.corsBlocked)
+      workingRelay = Number.isInteger(saved.workingRelay) ? saved.workingRelay : null
+    }
+  } catch {
+    /* no persisted state */
+  }
+}
+
+function saveRelayState() {
+  try {
+    sessionStorage.setItem(RELAY_STATE_KEY, JSON.stringify({ corsBlocked, workingRelay }))
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+if (typeof sessionStorage !== 'undefined') loadRelayState()
+
+/** True once direct MangaDex calls are known to be blocked (relay mode). */
+export function isRelayMode() {
+  return corsBlocked
+}
 
 function userProxyBase() {
   try {
@@ -198,45 +237,79 @@ async function relayFetch(relay, directUrl, externalSignal) {
     // A 429 here is usually the relay's own rate limit, not MangaDex's —
     // treat it as a relay failure so the race can move on.
     if (err.status === 429) {
-      throw new MangaDexError(`Relay ${relay.name} rate-limited`, { network: true })
+      const relayError = new MangaDexError(`Relay ${relay.name} rate-limited`, { network: true })
+      relayError.rateLimited = true
+      throw relayError
     }
     throw err
   }
 }
 
 /**
- * Race every public relay; first valid answer wins and is remembered.
- * An authoritative MangaDex error (4xx through a relay) rejects
- * immediately — the other relays would only repeat it.
+ * One relay attempt with pacing and health accounting: waits out the
+ * per-relay gap, and benches the relay (cooldown) on failure so retries
+ * and re-races don't hammer services that just refused us.
  */
-function raceRelays(directUrl) {
-  const controllers = PUBLIC_RELAYS.map(() => new AbortController())
+async function attemptRelay(index, directUrl, externalSignal) {
+  const gap = relayLastStart[index] + RELAY_MIN_GAP_MS - Date.now()
+  if (gap > 0) await new Promise((resolve) => setTimeout(resolve, gap))
+  relayLastStart[index] = Date.now()
+  try {
+    return await relayFetch(PUBLIC_RELAYS[index], directUrl, externalSignal)
+  } catch (err) {
+    if (!isUpstreamApiError(err)) {
+      const ms = err.rateLimited
+        ? COOLDOWN_MS.rateLimit
+        : err.invalidBody
+          ? COOLDOWN_MS.blockPage
+          : COOLDOWN_MS.network
+      relayCooldownUntil[index] = Date.now() + ms
+    }
+    throw err
+  }
+}
+
+const eligibleRelays = () => {
+  const now = Date.now()
+  return PUBLIC_RELAYS.map((_, i) => i).filter((i) => relayCooldownUntil[i] <= now)
+}
+
+/**
+ * Race the eligible public relays; first valid answer wins and is
+ * remembered. An authoritative MangaDex error (parsed 4xx through a relay)
+ * rejects immediately — the other relays would only repeat it.
+ */
+function raceRelays(directUrl, indexes) {
+  const controllers = indexes.map(() => new AbortController())
   return new Promise((resolve, reject) => {
-    let pending = PUBLIC_RELAYS.length
+    let pending = indexes.length
     let lastError = null
     let settled = false
 
-    PUBLIC_RELAYS.forEach((relay, index) => {
-      relayFetch(relay, directUrl, controllers[index].signal).then(
+    indexes.forEach((relayIndex, i) => {
+      attemptRelay(relayIndex, directUrl, controllers[i].signal).then(
         (body) => {
           if (settled) return
           settled = true
-          workingRelay = index
-          controllers.forEach((c, j) => j !== index && c.abort())
+          workingRelay = relayIndex
+          saveRelayState()
+          controllers.forEach((c, j) => j !== i && c.abort())
           resolve(body)
         },
         (err) => {
           if (settled) return
           if (isUpstreamApiError(err)) {
             settled = true
-            controllers.forEach((c, j) => j !== index && c.abort())
+            controllers.forEach((c, j) => j !== i && c.abort())
             reject(err)
             return
           }
           lastError = err
           if (--pending === 0) {
             settled = true
-            reject(new MangaDexError(RELAYS_DOWN_MESSAGE, { network: true, detail: lastError?.detail }))
+            reject(
+              new MangaDexError(RELAYS_DOWN_MESSAGE, { network: true, detail: lastError?.detail }),
+            )
           }
         },
       )
@@ -244,8 +317,7 @@ function raceRelays(directUrl) {
   })
 }
 
-async function request(path, params) {
-  const pathAndQuery = `${path}${buildQuery(params)}`
+async function performRequest(pathAndQuery) {
   const proxy = userProxyBase()
   if (proxy) {
     const { res, body } = await rawFetch(`${proxy}${pathAndQuery}`, RELAY_TIMEOUT_MS)
@@ -268,21 +340,78 @@ async function request(path, params) {
         err instanceof MangaDexError &&
         (err.network || err.invalidBody || err.status >= 500)
       if (!shouldFallback) throw err
-      if (err.network) corsBlocked = true // only a true CORS/network block is sticky
+      if (err.network) {
+        corsBlocked = true // only a true CORS/network block is sticky
+        saveRelayState()
+      }
     }
   }
 
   // Steady state: reuse the relay that won the race; on failure, re-race.
-  if (workingRelay != null) {
+  if (workingRelay != null && relayCooldownUntil[workingRelay] <= Date.now()) {
     try {
-      return await relayFetch(PUBLIC_RELAYS[workingRelay], directUrl)
+      return await attemptRelay(workingRelay, directUrl)
     } catch (err) {
       if (isUpstreamApiError(err)) throw err
       workingRelay = null
+      saveRelayState()
     }
   }
 
-  return raceRelays(directUrl)
+  const eligible = eligibleRelays()
+  if (eligible.length === 0) {
+    throw new MangaDexError(RELAYS_COOLING_MESSAGE, { network: true })
+  }
+  return raceRelays(directUrl, eligible)
+}
+
+/* ---------------------------------------------------------------------------
+ * Request layer: in-flight dedupe + short-TTL response cache. Repeat
+ * navigations and "Try again" loops hit the cache instead of re-spending
+ * relay quota.
+ * ------------------------------------------------------------------------ */
+
+const responseCache = new Map() // pathAndQuery -> { body, expires }
+const inflight = new Map() // pathAndQuery -> Promise
+
+function cacheTtl(pathAndQuery) {
+  if (pathAndQuery.startsWith('/at-home/')) return 0 // page URLs expire server-side
+  if (pathAndQuery.includes('/feed')) return 30 * 60_000
+  if (pathAndQuery.startsWith('/manga?')) return 10 * 60_000
+  return 6 * 60 * 60_000 // single manga / chapter lookups
+}
+
+/** Manual refresh: drop all cached responses. */
+export function clearApiCache() {
+  responseCache.clear()
+}
+
+/** Test hook: reset caches, relay health, and CORS discovery state. */
+export function __resetApiState() {
+  responseCache.clear()
+  inflight.clear()
+  corsBlocked = false
+  workingRelay = null
+  relayCooldownUntil.fill(0)
+  relayLastStart.fill(0)
+}
+
+async function request(path, params) {
+  const pathAndQuery = `${path}${buildQuery(params)}`
+
+  const cached = responseCache.get(pathAndQuery)
+  if (cached && cached.expires > Date.now()) return cached.body
+  if (inflight.has(pathAndQuery)) return inflight.get(pathAndQuery)
+
+  const pending = performRequest(pathAndQuery)
+    .then((body) => {
+      const ttl = cacheTtl(pathAndQuery)
+      if (ttl > 0) responseCache.set(pathAndQuery, { body, expires: Date.now() + ttl })
+      return body
+    })
+    .finally(() => inflight.delete(pathAndQuery))
+  inflight.set(pathAndQuery, pending)
+  return pending
 }
 
 /** Pick a display string from MangaDex's localized-string maps ({ en: "...", ja: "..." }). */
@@ -352,7 +481,15 @@ const DEFAULT_CONTENT_RATINGS = ['safe', 'suggestive']
  */
 export async function searchManga(
   title,
-  { limit = 20, offset = 0, contentRatings = DEFAULT_CONTENT_RATINGS } = {},
+  {
+    limit = 20,
+    offset = 0,
+    contentRatings = DEFAULT_CONTENT_RATINGS,
+    // When set, only titles with hosted (in-app readable) chapters in these
+    // languages are returned — excludes titles that exist on MangaDex only
+    // as external links after publisher takedowns.
+    availableLanguages,
+  } = {},
 ) {
   const body = await request('/manga', {
     title,
@@ -360,6 +497,7 @@ export async function searchManga(
     offset,
     includes: ['cover_art'],
     contentRating: contentRatings,
+    availableTranslatedLanguage: availableLanguages,
     order: { relevance: 'desc' },
   })
   return {
@@ -410,20 +548,23 @@ const FEED_MAX_PAGES = 20
  * ~5 req/s per IP). `onProgress(loaded, total)` fires after each batch.
  */
 export async function getChaptersAll(mangaId, { languages, contentRatings } = {}, onProgress) {
+  // Public relays choke on huge payloads; use smaller pages in relay mode.
+  const pageSize = isRelayMode() ? 150 : FEED_PAGE_SIZE
+  const maxPages = Math.ceil((FEED_MAX_PAGES * FEED_PAGE_SIZE) / pageSize)
   const items = []
   let offset = 0
   let total = Infinity
-  for (let page = 0; page < FEED_MAX_PAGES && offset < total; page++) {
+  for (let page = 0; page < maxPages && offset < total; page++) {
     if (page > 0) await new Promise((resolve) => setTimeout(resolve, 250))
     const batch = await getChapters(mangaId, {
       languages,
       contentRatings,
-      limit: FEED_PAGE_SIZE,
+      limit: pageSize,
       offset,
     })
     items.push(...batch.items)
     total = batch.total
-    offset += FEED_PAGE_SIZE
+    offset += pageSize
     onProgress?.(Math.min(items.length, total), total)
   }
   return items

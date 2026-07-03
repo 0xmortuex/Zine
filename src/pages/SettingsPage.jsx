@@ -393,6 +393,8 @@ function ContentSettings() {
   const setContentRatings = useSettings((s) => s.setContentRatings)
   const apiProxy = useSettings((s) => s.apiProxy)
   const setApiProxy = useSettings((s) => s.setApiProxy)
+  const readableOnly = useSettings((s) => s.readableOnly)
+  const setReadableOnly = useSettings((s) => s.setReadableOnly)
 
   function toggleRating(rating) {
     const next = contentRatings.includes(rating)
@@ -413,6 +415,17 @@ function ContentSettings() {
           onChange={(lang) => setLanguages([lang])}
           options={LANGUAGES}
           className="w-44"
+        />
+      </FieldRow>
+
+      <FieldRow
+        label="Readable in-app only"
+        hint="Hide titles whose chapters exist only on external official sites — publishers have those removed from MangaDex, so they can't be read here."
+      >
+        <Toggle
+          checked={readableOnly}
+          onChange={setReadableOnly}
+          label="Readable in-app only"
         />
       </FieldRow>
 

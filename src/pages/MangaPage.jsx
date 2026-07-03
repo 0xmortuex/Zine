@@ -290,6 +290,17 @@ function Chapters({ manga }) {
         />
       )}
 
+      {!loading && !error && entries.length === 0 && external.length > 0 && (
+        <div className="mb-6 rounded-lg border border-border bg-surface p-5">
+          <p className="stamp stamp-accent mb-3">publisher removed</p>
+          <p className="text-sm leading-relaxed text-muted">
+            This title's chapters were removed from MangaDex at the publisher's request, so they
+            can't be read in-app — only the official external sources below remain. Titles like
+            this are hidden from search by default (Settings → Content → Readable in-app only).
+          </p>
+        </div>
+      )}
+
       {!loading && !error && (entries.length > 0 || external.length > 0) && (
         <motion.div
           initial="hidden"
