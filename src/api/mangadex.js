@@ -54,6 +54,10 @@ const PUBLIC_RELAYS = [
       body: JSON.parse(envelope?.contents ?? ''),
     }),
   },
+  {
+    name: 'cors-eu',
+    wrap: (url) => `https://cors.eu.org/${url}`,
+  },
 ]
 
 const RELAYS_DOWN_MESSAGE =
@@ -75,12 +79,16 @@ function userProxyBase() {
 }
 
 export class MangaDexError extends Error {
-  constructor(message, { status, detail, network = false } = {}) {
+  constructor(message, { status, detail, network = false, invalidBody = false } = {}) {
     super(message)
     this.name = 'MangaDexError'
     this.status = status
     this.detail = detail
     this.network = network
+    // True when the response body wasn't MangaDex JSON at all — a relay
+    // block page, Cloudflare challenge, captive portal, etc. Such a
+    // response is never an authoritative MangaDex answer.
+    this.invalidBody = invalidBody
   }
 }
 
@@ -139,8 +147,15 @@ function validate(status, body, statusText = '') {
       status: 429,
     })
   }
-  if (!body || status >= 400 || body.result === 'error') {
-    const detail = body?.errors?.[0]?.detail ?? (body ? statusText : 'Invalid JSON response')
+  if (!body) {
+    throw new MangaDexError('MangaDex request failed: Invalid JSON response', {
+      status,
+      detail: 'Invalid JSON response',
+      invalidBody: true,
+    })
+  }
+  if (status >= 400 || body.result === 'error') {
+    const detail = body?.errors?.[0]?.detail ?? statusText
     throw new MangaDexError(`MangaDex request failed: ${detail}`, { status, detail })
   }
   return body
@@ -151,9 +166,17 @@ async function directFetch(url, timeoutMs = DIRECT_TIMEOUT_MS) {
   return validate(res.status, body, res.statusText)
 }
 
-/** Genuine upstream API errors shouldn't be retried on another relay. */
+/**
+ * Genuine upstream API errors shouldn't be retried on another relay.
+ * Requires a parsed JSON body: a 4xx wrapping HTML is a relay's own block
+ * page (or a Cloudflare challenge), NOT a MangaDex answer.
+ */
 const isUpstreamApiError = (err) =>
-  err instanceof MangaDexError && err.status >= 400 && err.status < 500 && err.status !== 429
+  err instanceof MangaDexError &&
+  err.status >= 400 &&
+  err.status < 500 &&
+  err.status !== 429 &&
+  !err.invalidBody
 
 async function relayFetch(relay, directUrl, externalSignal) {
   const { res, body } = await rawFetch(relay.wrap(directUrl), RELAY_TIMEOUT_MS, externalSignal)
@@ -236,11 +259,16 @@ async function request(path, params) {
     try {
       return await directFetch(directUrl)
     } catch (err) {
-      // A network-level failure on a direct browser call is almost always
-      // the CORS block — fall through to the public relays. Anything else
-      // (real API errors, rate limits, node) propagates.
-      if (!isBrowser || !(err instanceof MangaDexError) || !err.network) throw err
-      corsBlocked = true
+      // Fall through to the public relays when the direct call failed at
+      // the network level (the CORS block), returned garbage instead of
+      // JSON (Cloudflare challenge, captive portal), or 5xx'd. Real parsed
+      // API errors and rate limits propagate; node never relays.
+      const shouldFallback =
+        isBrowser &&
+        err instanceof MangaDexError &&
+        (err.network || err.invalidBody || err.status >= 500)
+      if (!shouldFallback) throw err
+      if (err.network) corsBlocked = true // only a true CORS/network block is sticky
     }
   }
 

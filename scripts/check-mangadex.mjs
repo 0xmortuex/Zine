@@ -96,14 +96,15 @@ console.log('getChapter ok')
     new Response(JSON.stringify({ result: 'ok', data: { ...feedItem(0), relationships: [] } }), {
       status: 200,
     })
+  const blockPage = (status = 403) =>
+    new Response('<html>blocked — get an api key</html>', { status })
   const attempts = []
 
-  // Direct CORS-fails → all relays race; only allorigins/raw answers.
+  // Direct call returns garbage (Cloudflare challenge / captive portal)
+  // → must fall through to the relays, not surface "Invalid JSON".
   globalThis.fetch = async (url) => {
     attempts.push(url)
-    if (url.startsWith('https://api.mangadex.org')) {
-      throw new TypeError('Failed to fetch') // what a CORS block looks like
-    }
+    if (url.startsWith('https://api.mangadex.org')) return blockPage(503)
     if (url.startsWith('https://api.allorigins.win/raw?url=')) return okBody()
     throw new TypeError('Failed to fetch') // every other relay is down
   }
@@ -118,17 +119,27 @@ console.log('getChapter ok')
     ),
     'relay URL should wrap the direct API URL',
   )
-  console.log('relay race fallback ok')
+  console.log('direct-garbage fallback + relay race ok')
 
-  // Winner is remembered: next request goes straight to it, no direct, no race.
+  // A true CORS block (network throw) is sticky: direct is skipped afterwards.
+  attempts.length = 0
+  globalThis.fetch = async (url) => {
+    attempts.push(url)
+    if (url.startsWith('https://api.mangadex.org')) {
+      throw new TypeError('Failed to fetch') // what a CORS block looks like
+    }
+    if (url.startsWith('https://api.allorigins.win/raw?url=')) return okBody()
+    throw new TypeError('Failed to fetch')
+  }
+  await getChapter('ch-0')
   attempts.length = 0
   await getChapter('ch-0')
   assert.deepEqual(
     attempts.map((u) => new URL(u).host),
     ['api.allorigins.win'],
-    'winning relay should be remembered',
+    'after a CORS block, requests go relay-first',
   )
-  console.log('relay memory ok')
+  console.log('sticky CORS block ok')
 
   // Winner dies → re-race, another relay takes over.
   attempts.length = 0
@@ -147,6 +158,21 @@ console.log('getChapter ok')
     'failover winner should be remembered',
   )
   console.log('relay failover ok')
+
+  // REGRESSION: a relay answering with its own 4xx HTML block page must be
+  // treated as a relay failure, not an authoritative MangaDex error — the
+  // race continues and another relay can still win.
+  attempts.length = 0
+  globalThis.fetch = async (url) => {
+    attempts.push(url)
+    if (url.startsWith('https://api.codetabs.com')) return blockPage(403) // remembered relay now blocks
+    if (url.startsWith('https://corsproxy.io')) return blockPage(403)
+    if (url.startsWith('https://api.allorigins.win/raw?url=')) return okBody()
+    throw new TypeError('Failed to fetch')
+  }
+  const viaBlockPageEscape = await getChapter('ch-0')
+  assert.equal(viaBlockPageEscape.id, 'ch-0')
+  console.log('relay block-page not authoritative ok')
 
   // A real API error through the remembered relay is authoritative.
   attempts.length = 0
