@@ -439,12 +439,12 @@ function ContentSettings() {
       </div>
 
       <div>
-        <p className="mb-1 text-sm font-medium">API proxy</p>
+        <p className="mb-1 text-sm font-medium">API proxy (optional)</p>
         <p className="mb-3 text-xs text-muted">
-          MangaDex blocks direct browser calls from other websites (CORS). Without a proxy, Zine
-          falls back to a public relay, which can be slow. For a fast, reliable connection, deploy
-          the 1-file Cloudflare Worker from <code className="text-accent">cors-proxy/worker.js</code>{' '}
-          in the repo and paste its URL here.
+          Leave empty — Zine automatically routes around MangaDex’s CORS block using a chain of
+          public relays; no setup needed. If you ever want a private, faster relay instead, point
+          this at any server that forwards to api.mangadex.org (a ready-made one-file worker ships
+          in <code className="text-accent">cors-proxy/worker.js</code>).
         </p>
         <input
           type="url"

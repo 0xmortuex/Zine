@@ -18,12 +18,22 @@ const COVER_BASE = 'https://uploads.mangadex.org/covers'
 /**
  * MangaDex's API doesn't send CORS headers for third-party origins, so
  * direct browser calls from a hosted site (e.g. GitHub Pages) fail as
- * opaque network errors. Two escape hatches, in priority order:
- *   1. A user-configured proxy (Settings → Content → API proxy) — e.g. a
- *      personal Cloudflare Worker (see cors-proxy/worker.js).
- *   2. A public CORS relay as an automatic zero-setup fallback.
+ * opaque network errors. Escape hatches, in priority order:
+ *   1. A user-configured proxy (Settings → Content → API proxy), for
+ *      anyone who wants a private relay (see cors-proxy/worker.js).
+ *   2. Zero-setup fallback: a chain of public CORS relays, tried in order
+ *      until one answers. The working relay is remembered for the session,
+ *      and once a direct call has CORS-failed we go relay-first instead of
+ *      re-paying the failed direct attempt on every request.
  */
-const PUBLIC_CORS_RELAY = (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
+const PUBLIC_RELAYS = [
+  (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  (url) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
+  (url) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+]
+
+let corsBlocked = false // a direct call failed at the network level this session
+let workingRelay = 0 // index of the last relay that answered
 
 function userProxyBase() {
   try {
@@ -86,8 +96,8 @@ async function doFetch(url) {
   }
 
   const body = await res.json().catch(() => null)
-  if (!res.ok || body?.result === 'error') {
-    const detail = body?.errors?.[0]?.detail ?? res.statusText
+  if (!res.ok || !body || body.result === 'error') {
+    const detail = body?.errors?.[0]?.detail ?? (body ? res.statusText : 'Invalid JSON response')
     throw new MangaDexError(`MangaDex request failed: ${detail}`, {
       status: res.status,
       detail,
@@ -96,22 +106,43 @@ async function doFetch(url) {
   return body
 }
 
+/** Genuine upstream API errors shouldn't be retried on another relay. */
+const isUpstreamApiError = (err) =>
+  err instanceof MangaDexError && err.status >= 400 && err.status < 500 && err.status !== 429
+
 async function request(path, params) {
   const pathAndQuery = `${path}${buildQuery(params)}`
   const proxy = userProxyBase()
+  if (proxy) return doFetch(`${proxy}${pathAndQuery}`)
 
-  try {
-    return await doFetch(`${proxy ?? API_BASE}${pathAndQuery}`)
-  } catch (err) {
-    // A network-level failure on a direct browser call is almost always the
-    // CORS block; retry once through the public relay so hosted deployments
-    // work with zero setup. Never engages in node or when a proxy is set.
-    const isBrowser = typeof window !== 'undefined'
-    if (err instanceof MangaDexError && err.network && !proxy && isBrowser) {
-      return await doFetch(PUBLIC_CORS_RELAY(`${API_BASE}${pathAndQuery}`))
+  const directUrl = `${API_BASE}${pathAndQuery}`
+  const isBrowser = typeof window !== 'undefined'
+
+  if (!isBrowser || !corsBlocked) {
+    try {
+      return await doFetch(directUrl)
+    } catch (err) {
+      // A network-level failure on a direct browser call is almost always
+      // the CORS block — fall through to the public relays. Anything else
+      // (real API errors, rate limits, node) propagates.
+      if (!isBrowser || !(err instanceof MangaDexError) || !err.network) throw err
+      corsBlocked = true
     }
-    throw err
   }
+
+  let lastError
+  for (let i = 0; i < PUBLIC_RELAYS.length; i++) {
+    const index = (workingRelay + i) % PUBLIC_RELAYS.length
+    try {
+      const body = await doFetch(PUBLIC_RELAYS[index](directUrl))
+      workingRelay = index
+      return body
+    } catch (err) {
+      if (isUpstreamApiError(err)) throw err // MangaDex answered through the relay
+      lastError = err // relay itself is down/blocked/mangling — try the next
+    }
+  }
+  throw lastError
 }
 
 /** Pick a display string from MangaDex's localized-string maps ({ en: "...", ja: "..." }). */

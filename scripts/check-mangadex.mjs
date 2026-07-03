@@ -114,6 +114,51 @@ console.log('getChapter ok')
   )
   console.log('public-relay CORS fallback ok')
 
+  // --- relay failover: first relay down → second relay serves; the working
+  // relay is remembered and the (already failed) direct call is skipped ---
+  attempts.length = 0
+  globalThis.fetch = async (url) => {
+    attempts.push(url)
+    if (url.startsWith('https://api.mangadex.org')) {
+      throw new TypeError('Failed to fetch')
+    }
+    if (url.startsWith('https://api.allorigins.win')) {
+      throw new TypeError('Failed to fetch') // relay 1 down
+    }
+    assert.ok(url.startsWith('https://corsproxy.io/?url='))
+    return new Response(
+      JSON.stringify({ result: 'ok', data: { ...feedItem(0), relationships: [] } }),
+      { status: 200 },
+    )
+  }
+  await getChapter('ch-0')
+  // direct already known-blocked from the previous test → relay-first
+  assert.deepEqual(
+    attempts.map((u) => new URL(u).host),
+    ['api.allorigins.win', 'corsproxy.io'],
+  )
+  attempts.length = 0
+  await getChapter('ch-0')
+  assert.deepEqual(
+    attempts.map((u) => new URL(u).host),
+    ['corsproxy.io'],
+    'working relay should be remembered',
+  )
+  console.log('relay failover + memory ok')
+
+  // --- a real API error through a relay is NOT retried on other relays ---
+  attempts.length = 0
+  globalThis.fetch = async (url) => {
+    attempts.push(url)
+    return new Response(
+      JSON.stringify({ result: 'error', errors: [{ status: 404, detail: 'Chapter not found' }] }),
+      { status: 404 },
+    )
+  }
+  await assert.rejects(() => getChapter('nope'), /Chapter not found/)
+  assert.equal(attempts.length, 1, 'upstream 404 must not be retried across relays')
+  console.log('upstream error passthrough ok')
+
   // --- user-configured proxy takes priority, no relay retry ---
   globalThis.localStorage.store['zine-settings'] = JSON.stringify({
     state: { apiProxy: 'https://zine-mangadex.example.workers.dev/' },

@@ -109,16 +109,19 @@ node scripts/check-autoplay.mjs      # autoplay stepper + preload window math
 
 MangaDex's API does not send CORS headers for third-party origins, so a
 hosted Zine (GitHub Pages, Cloudflare, …) can't call it directly from the
-browser. Zine handles this in two layers:
+browser. Zine handles this automatically — **no setup required**:
 
-1. **Zero-setup fallback** — when a direct call fails at the network level,
-   the client automatically retries through a public CORS relay
-   (allorigins.win). Works out of the box, but it's a shared free service:
-   expect occasional slowness.
-2. **Personal proxy (recommended)** — deploy `cors-proxy/worker.js` as a
-   Cloudflare Worker (free, ~5 minutes, instructions in the file header) and
-   paste the worker URL into **Settings → Content → API proxy**. All API
-   traffic then goes through your own fast, private relay.
+1. **Built-in relay failover (default)** — when a direct call CORS-fails,
+   the client routes through a chain of public relays (allorigins.win →
+   corsproxy.io → codetabs.com), remembers whichever one answers, and stops
+   re-trying the blocked direct path for the session. A genuine MangaDex
+   error (like a 404) passing through a relay is surfaced as-is, never
+   retried across relays.
+2. **Personal proxy (optional)** — if the public relays ever feel slow, any
+   server that forwards requests to `api.mangadex.org` can be set as
+   **Settings → Content → API proxy**. A ready-made one-file worker ships in
+   `cors-proxy/worker.js` (deployable on Cloudflare's free tier), but
+   nothing in Zine requires it.
 
 Images (covers, chapter pages) are unaffected — they load as plain `<img>`
 elements, which browsers don't subject to CORS.
