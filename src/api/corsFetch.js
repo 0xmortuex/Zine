@@ -82,8 +82,14 @@ export const RELAYS_COOLING_MESSAGE =
 const STATE_KEY = 'zine:relay-state-v2'
 const blockedOrigins = new Set()
 const winnerByOrigin = new Map()
-const relayCooldownUntil = PUBLIC_RELAYS.map(() => 0)
+// Cooldowns are PER (upstream origin, relay): a relay that Comick's bot
+// protection block-pages may still be perfectly fine for MangaDex — one
+// misbehaving source must not poison the shared pool for the others.
+const relayCooldownUntil = new Map() // `${origin}|${relayIndex}` -> timestamp
 const relayLastStart = PUBLIC_RELAYS.map(() => 0)
+
+const cooldownKey = (origin, index) => `${origin}|${index}`
+const cooledUntil = (origin, index) => relayCooldownUntil.get(cooldownKey(origin, index)) ?? 0
 
 function loadState() {
   try {
@@ -121,7 +127,7 @@ export function isCorsBlocked(origin) {
 export function __resetCorsState() {
   blockedOrigins.clear()
   winnerByOrigin.clear()
-  relayCooldownUntil.fill(0)
+  relayCooldownUntil.clear()
   relayLastStart.fill(0)
 }
 
@@ -155,6 +161,7 @@ async function relayFetch(index, directUrl, externalSignal) {
   if (gap > 0) await new Promise((resolve) => setTimeout(resolve, gap))
   relayLastStart[index] = Date.now()
 
+  const origin = new URL(directUrl).origin
   const relay = PUBLIC_RELAYS[index]
   try {
     const result = await rawFetch(relay.wrap(directUrl), RELAY_TIMEOUT_MS, externalSignal)
@@ -183,7 +190,7 @@ async function relayFetch(index, directUrl, externalSignal) {
       : err.invalidBody
         ? COOLDOWN_MS.blockPage
         : COOLDOWN_MS.network
-    relayCooldownUntil[index] = Date.now() + ms
+    relayCooldownUntil.set(cooldownKey(origin, index), Date.now() + ms)
     throw err
   }
 }
@@ -246,7 +253,7 @@ export async function fetchJsonResilient(url, { skipRelays = false } = {}) {
 
   // Steady state: reuse this origin's winning relay; on failure, re-race.
   const winner = winnerByOrigin.get(origin)
-  if (winner != null && relayCooldownUntil[winner] <= Date.now()) {
+  if (winner != null && cooledUntil(origin, winner) <= Date.now()) {
     try {
       return await relayFetch(winner, url)
     } catch {
@@ -256,7 +263,7 @@ export async function fetchJsonResilient(url, { skipRelays = false } = {}) {
   }
 
   const now = Date.now()
-  const eligible = PUBLIC_RELAYS.map((_, i) => i).filter((i) => relayCooldownUntil[i] <= now)
+  const eligible = PUBLIC_RELAYS.map((_, i) => i).filter((i) => cooledUntil(origin, i) <= now)
   if (eligible.length === 0) {
     throw new MangaDexError(RELAYS_COOLING_MESSAGE, { network: true })
   }

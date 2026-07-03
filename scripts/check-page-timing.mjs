@@ -17,12 +17,12 @@ assert.ok(computeReadSeconds(BASE, 0.7, null) < BASE)
 const sparse = computeReadSeconds(BASE, 1.45, 0.05)
 const dense = computeReadSeconds(BASE, 1.45, 0.85)
 assert.ok(sparse < BASE, `sparse (${sparse}) should be under base`)
-assert.ok(dense > BASE * 1.5, `dense (${dense}) should be well over base`)
-assert.ok(dense / sparse > 2, 'dense pages should get at least 2x sparse pages')
+assert.ok(dense > BASE * 2, `dense (${dense}) should be well over 2x base`)
+assert.ok(dense / sparse > 2.5, 'dense pages should get at least 2.5x sparse pages')
 
 // Hard floors/ceilings: never absurdly short or long.
-assert.ok(computeReadSeconds(1, 0.5, 0) >= 2)
-assert.ok(computeReadSeconds(60, 6, 1) <= 90)
+assert.ok(computeReadSeconds(1, 0.5, 0) >= 4, 'floor is 4s')
+assert.ok(computeReadSeconds(60, 6, 1) <= 120, 'ceiling is 120s')
 
 // Monotonic in busyness.
 let prev = 0

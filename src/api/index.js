@@ -51,9 +51,14 @@ const withTimeout = (promise, ms) =>
 export async function searchManga(title, opts = {}) {
   if (USING_FIXTURES) return api.searchManga(title, opts)
 
+  // Comick starts 400ms behind so the two discovery relay-races don't
+  // slam the shared relay pool at the exact same instant.
+  const comickDelayed = new Promise((resolve) => setTimeout(resolve, 400)).then(() =>
+    searchComick(title, { limit: opts.limit }),
+  )
   const attempts = await Promise.allSettled([
     withTimeout(real.searchManga(title, opts), SEARCH_SOURCE_TIMEOUT_MS),
-    withTimeout(searchComick(title, { limit: opts.limit }), SEARCH_SOURCE_TIMEOUT_MS),
+    withTimeout(comickDelayed, SEARCH_SOURCE_TIMEOUT_MS),
   ])
 
   const [mangadex, comick] = attempts
