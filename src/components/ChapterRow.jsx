@@ -59,8 +59,13 @@ export default function ChapterRow({ mangaId, entry, isRead, isCurrent, showAllV
               {entry.title || `Chapter ${entry.chapter}`}
             </span>
             <span className="block truncate text-xs text-muted">
-              {entry.scanlationGroup ?? 'unknown group'} · {relativeDate(entry.publishAt)} ·{' '}
-              <span className="tnum">{entry.pages}</span> pages
+              {entry.scanlationGroup ?? 'unknown group'} · {relativeDate(entry.publishAt)}
+              {entry.pages != null && (
+                <>
+                  {' '}
+                  · <span className="tnum">{entry.pages}</span> pages
+                </>
+              )}
             </span>
           </span>
         </Link>

@@ -75,6 +75,7 @@ export default function MangaCard({ manga }) {
           <p className="flex items-center gap-2">
             {manga.year && <span className="tnum text-xs text-muted">{manga.year}</span>}
             {manga.status && <span className="stamp">{manga.status}</span>}
+            {manga.source === 'comick' && <span className="stamp stamp-accent">ck</span>}
           </p>
         </div>
       </Link>

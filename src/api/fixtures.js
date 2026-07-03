@@ -80,8 +80,33 @@ function fixtureCover(index, title) {
 /**
  * Generated manga page: paper background, panel grid with varied layout,
  * screentone dots, speech bubble, action burst, page number.
+ * Density varies by page number so smart autoplay timing is observable:
+ * every 5th page is a sparse spread (short read), every 3rd is dense with
+ * text-like hatching (long read).
  */
 function fixturePage(seed, n) {
+  const density = n % 5 === 0 ? 'sparse' : n % 3 === 0 ? 'dense' : 'normal'
+
+  if (density === 'sparse') {
+    return uri(`<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1200" viewBox="0 0 800 1200">
+  <rect width="800" height="1200" fill="oklch(0.97 0.005 90)"/>
+  <rect x="60" y="70" width="680" height="1060" fill="white" stroke="black" stroke-width="4"/>
+  <circle cx="400" cy="560" r="110" fill="none" stroke="black" stroke-width="5"/>
+  <text x="400" y="1180" text-anchor="middle" font-family="Georgia, serif" font-size="22" fill="black">— ${n} (spread) —</text>
+</svg>`)
+  }
+
+  // Dense pages get rows of text-like hatching: high edge frequency.
+  const hatch =
+    density === 'dense'
+      ? Array.from({ length: 120 }, (_, i) => {
+          const row = Math.floor(i / 4)
+          const col = i % 4
+          const w = 90 + ((i * 37) % 70)
+          return `<rect x="${80 + col * 170}" y="${250 + row * 28}" width="${w}" height="9" fill="black" opacity="0.8"/>`
+        }).join('')
+      : ''
+
   const layout = (seed + n) % 3
   const tone = Array.from({ length: 60 }, (_, d) => {
     const col = d % 10
@@ -117,6 +142,7 @@ function fixturePage(seed, n) {
   <rect width="800" height="1200" fill="oklch(0.97 0.005 90)"/>
   ${panels}
   ${tone}
+  ${hatch}
   <ellipse cx="240" cy="180" rx="120" ry="62" fill="white" stroke="black" stroke-width="3"/>
   <polygon points="230,236 260,232 218,278" fill="white" stroke="black" stroke-width="3"/>
   <text x="240" y="176" text-anchor="middle" font-family="system-ui" font-weight="bold" font-size="26">PAGE ${n}!</text>

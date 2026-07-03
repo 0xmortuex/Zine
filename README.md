@@ -118,6 +118,15 @@ chapters can be added from the series page, which also has
 never bundles or distributes manga content itself — you import your own
 files.
 
+## Online sources
+
+Zine is multi-source: search queries **MangaDex** and **Comick** in
+parallel and merges whatever answers (duplicates collapsed by title,
+Comick results marked with a `ck` stamp). Detail pages, chapter lists, and
+pages route to whichever source owns the book, so one source being slow,
+rate-limited, or blocked doesn't take the app down. Both sources ride the
+same CORS-resilient pipeline below.
+
 ## MangaDex API and CORS (hosted deployments)
 
 MangaDex's API does not send CORS headers for third-party origins, so a

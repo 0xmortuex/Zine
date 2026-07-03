@@ -16,95 +16,18 @@ const API_BASE = 'https://api.mangadex.org'
 const COVER_BASE = 'https://uploads.mangadex.org/covers'
 
 /**
- * MangaDex's API doesn't send CORS headers for third-party origins, so
- * direct browser calls from a hosted site (e.g. GitHub Pages) fail as
- * opaque network errors. Escape hatches, in priority order:
- *   1. A user-configured proxy (Settings → Content → API proxy), for
- *      anyone who wants a private relay (see cors-proxy/worker.js).
- *   2. Zero-setup fallback: public CORS relays. Every attempt carries a
- *      hard timeout (public relays hang more often than they error), the
- *      first discovery RACES all relays in parallel and the first valid
- *      answer wins, the winner is remembered for the session, and once a
- *      direct call has CORS-failed we go relay-first instead of re-paying
- *      the failed direct attempt on every request.
+ * Networking: userProxyBase() reads an optional personal relay from
+ * settings; everything else (direct fetch, CORS-block discovery, public
+ * relay racing, cooldowns) lives in ./corsFetch and is shared with the
+ * other online sources.
  */
-const DIRECT_TIMEOUT_MS = 4_000
-const RELAY_TIMEOUT_MS = 15_000
+import { fetchJsonResilient, isCorsBlocked, MangaDexError, __resetCorsState } from './corsFetch.js'
 
-const PUBLIC_RELAYS = [
-  {
-    name: 'allorigins',
-    wrap: (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-  },
-  {
-    name: 'codetabs',
-    wrap: (url) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
-  },
-  {
-    name: 'corsproxy',
-    wrap: (url) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
-  },
-  {
-    // allorigins' JSON envelope endpoint — different code path on their
-    // side, so it often works when /raw is struggling.
-    name: 'allorigins-json',
-    wrap: (url) => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
-    unwrap: (envelope) => ({
-      status: envelope?.status?.http_code ?? 200,
-      body: JSON.parse(envelope?.contents ?? ''),
-    }),
-  },
-  {
-    name: 'cors-eu',
-    wrap: (url) => `https://cors.eu.org/${url}`,
-  },
-]
-
-const RELAYS_DOWN_MESSAGE =
-  'Could not reach MangaDex: the direct connection is blocked (CORS or network) and no public ' +
-  'relay responded. If this keeps happening, your network may be blocking MangaDex — try a ' +
-  'VPN, or set a personal API proxy in Settings → Content.'
-
-const RELAYS_COOLING_MESSAGE =
-  'The public relays are cooling down after failures or rate limits. Wait a minute and retry — ' +
-  'or set a personal API proxy in Settings → Content for an always-fast connection.'
-
-/* Relay health state, persisted for the session so reloads skip rediscovery. */
-const RELAY_STATE_KEY = 'zine:relay-state'
-let corsBlocked = false // a direct call failed at the network level this session
-let workingRelay = null // index of the relay that won the race, if any
-const relayCooldownUntil = PUBLIC_RELAYS.map(() => 0)
-const relayLastStart = PUBLIC_RELAYS.map(() => 0)
-
-/* How long to bench a relay after each failure mode. */
-const COOLDOWN_MS = { rateLimit: 90_000, blockPage: 300_000, network: 30_000 }
-const RELAY_MIN_GAP_MS = 300 // pacing between requests to the same relay
-
-function loadRelayState() {
-  try {
-    const saved = JSON.parse(sessionStorage.getItem(RELAY_STATE_KEY))
-    if (saved) {
-      corsBlocked = Boolean(saved.corsBlocked)
-      workingRelay = Number.isInteger(saved.workingRelay) ? saved.workingRelay : null
-    }
-  } catch {
-    /* no persisted state */
-  }
-}
-
-function saveRelayState() {
-  try {
-    sessionStorage.setItem(RELAY_STATE_KEY, JSON.stringify({ corsBlocked, workingRelay }))
-  } catch {
-    /* storage unavailable */
-  }
-}
-
-if (typeof sessionStorage !== 'undefined') loadRelayState()
+export { MangaDexError }
 
 /** True once direct MangaDex calls are known to be blocked (relay mode). */
 export function isRelayMode() {
-  return corsBlocked
+  return isCorsBlocked(API_BASE)
 }
 
 function userProxyBase() {
@@ -114,20 +37,6 @@ function userProxyBase() {
     return proxy ? proxy.trim().replace(/\/+$/, '') : null
   } catch {
     return null
-  }
-}
-
-export class MangaDexError extends Error {
-  constructor(message, { status, detail, network = false, invalidBody = false } = {}) {
-    super(message)
-    this.name = 'MangaDexError'
-    this.status = status
-    this.detail = detail
-    this.network = network
-    // True when the response body wasn't MangaDex JSON at all — a relay
-    // block page, Cloudflare challenge, captive portal, etc. Such a
-    // response is never an authoritative MangaDex answer.
-    this.invalidBody = invalidBody
   }
 }
 
@@ -154,31 +63,6 @@ function buildQuery(params = {}) {
   return s ? `?${s}` : ''
 }
 
-/** Timeout signal, optionally combined with an external abort (relay race). */
-function makeSignal(timeoutMs, external) {
-  const timeout = AbortSignal.timeout?.(timeoutMs)
-  if (timeout && external && AbortSignal.any) return AbortSignal.any([timeout, external])
-  return external ?? timeout
-}
-
-/** Fetch + JSON parse. Network-level failures (incl. timeouts) throw with network: true. */
-async function rawFetch(url, timeoutMs, externalSignal) {
-  let res
-  try {
-    res = await fetch(url, {
-      headers: { Accept: 'application/json' },
-      signal: makeSignal(timeoutMs, externalSignal),
-    })
-  } catch (err) {
-    throw new MangaDexError('Network error reaching MangaDex', {
-      detail: err.message,
-      network: true,
-    })
-  }
-  const body = await res.json().catch(() => null)
-  return { res, body }
-}
-
 /** Turn a (status, parsed body) pair into a result or a typed error. */
 function validate(status, body, statusText = '') {
   if (status === 429) {
@@ -200,169 +84,11 @@ function validate(status, body, statusText = '') {
   return body
 }
 
-async function directFetch(url, timeoutMs = DIRECT_TIMEOUT_MS) {
-  const { res, body } = await rawFetch(url, timeoutMs)
-  return validate(res.status, body, res.statusText)
-}
-
-/**
- * Genuine upstream API errors shouldn't be retried on another relay.
- * Requires a parsed JSON body: a 4xx wrapping HTML is a relay's own block
- * page (or a Cloudflare challenge), NOT a MangaDex answer.
- */
-const isUpstreamApiError = (err) =>
-  err instanceof MangaDexError &&
-  err.status >= 400 &&
-  err.status < 500 &&
-  err.status !== 429 &&
-  !err.invalidBody
-
-async function relayFetch(relay, directUrl, externalSignal) {
-  const { res, body } = await rawFetch(relay.wrap(directUrl), RELAY_TIMEOUT_MS, externalSignal)
-  let status = res.status
-  let payload = body
-  if (relay.unwrap) {
-    let inner
-    try {
-      inner = relay.unwrap(body)
-    } catch {
-      throw new MangaDexError(`Relay ${relay.name} returned an invalid envelope`, { network: true })
-    }
-    status = inner.status
-    payload = inner.body
-  }
-  try {
-    return validate(status, payload, res.statusText)
-  } catch (err) {
-    // A 429 here is usually the relay's own rate limit, not MangaDex's —
-    // treat it as a relay failure so the race can move on.
-    if (err.status === 429) {
-      const relayError = new MangaDexError(`Relay ${relay.name} rate-limited`, { network: true })
-      relayError.rateLimited = true
-      throw relayError
-    }
-    throw err
-  }
-}
-
-/**
- * One relay attempt with pacing and health accounting: waits out the
- * per-relay gap, and benches the relay (cooldown) on failure so retries
- * and re-races don't hammer services that just refused us.
- */
-async function attemptRelay(index, directUrl, externalSignal) {
-  const gap = relayLastStart[index] + RELAY_MIN_GAP_MS - Date.now()
-  if (gap > 0) await new Promise((resolve) => setTimeout(resolve, gap))
-  relayLastStart[index] = Date.now()
-  try {
-    return await relayFetch(PUBLIC_RELAYS[index], directUrl, externalSignal)
-  } catch (err) {
-    if (!isUpstreamApiError(err)) {
-      const ms = err.rateLimited
-        ? COOLDOWN_MS.rateLimit
-        : err.invalidBody
-          ? COOLDOWN_MS.blockPage
-          : COOLDOWN_MS.network
-      relayCooldownUntil[index] = Date.now() + ms
-    }
-    throw err
-  }
-}
-
-const eligibleRelays = () => {
-  const now = Date.now()
-  return PUBLIC_RELAYS.map((_, i) => i).filter((i) => relayCooldownUntil[i] <= now)
-}
-
-/**
- * Race the eligible public relays; first valid answer wins and is
- * remembered. An authoritative MangaDex error (parsed 4xx through a relay)
- * rejects immediately — the other relays would only repeat it.
- */
-function raceRelays(directUrl, indexes) {
-  const controllers = indexes.map(() => new AbortController())
-  return new Promise((resolve, reject) => {
-    let pending = indexes.length
-    let lastError = null
-    let settled = false
-
-    indexes.forEach((relayIndex, i) => {
-      attemptRelay(relayIndex, directUrl, controllers[i].signal).then(
-        (body) => {
-          if (settled) return
-          settled = true
-          workingRelay = relayIndex
-          saveRelayState()
-          controllers.forEach((c, j) => j !== i && c.abort())
-          resolve(body)
-        },
-        (err) => {
-          if (settled) return
-          if (isUpstreamApiError(err)) {
-            settled = true
-            controllers.forEach((c, j) => j !== i && c.abort())
-            reject(err)
-            return
-          }
-          lastError = err
-          if (--pending === 0) {
-            settled = true
-            reject(
-              new MangaDexError(RELAYS_DOWN_MESSAGE, { network: true, detail: lastError?.detail }),
-            )
-          }
-        },
-      )
-    })
-  })
-}
-
 async function performRequest(pathAndQuery) {
   const proxy = userProxyBase()
-  if (proxy) {
-    const { res, body } = await rawFetch(`${proxy}${pathAndQuery}`, RELAY_TIMEOUT_MS)
-    return validate(res.status, body, res.statusText)
-  }
-
-  const directUrl = `${API_BASE}${pathAndQuery}`
-  const isBrowser = typeof window !== 'undefined'
-
-  if (!isBrowser || !corsBlocked) {
-    try {
-      return await directFetch(directUrl)
-    } catch (err) {
-      // Fall through to the public relays when the direct call failed at
-      // the network level (the CORS block), returned garbage instead of
-      // JSON (Cloudflare challenge, captive portal), or 5xx'd. Real parsed
-      // API errors and rate limits propagate; node never relays.
-      const shouldFallback =
-        isBrowser &&
-        err instanceof MangaDexError &&
-        (err.network || err.invalidBody || err.status >= 500)
-      if (!shouldFallback) throw err
-      if (err.network) {
-        corsBlocked = true // only a true CORS/network block is sticky
-        saveRelayState()
-      }
-    }
-  }
-
-  // Steady state: reuse the relay that won the race; on failure, re-race.
-  if (workingRelay != null && relayCooldownUntil[workingRelay] <= Date.now()) {
-    try {
-      return await attemptRelay(workingRelay, directUrl)
-    } catch (err) {
-      if (isUpstreamApiError(err)) throw err
-      workingRelay = null
-      saveRelayState()
-    }
-  }
-
-  const eligible = eligibleRelays()
-  if (eligible.length === 0) {
-    throw new MangaDexError(RELAYS_COOLING_MESSAGE, { network: true })
-  }
-  return raceRelays(directUrl, eligible)
+  const url = `${proxy ?? API_BASE}${pathAndQuery}`
+  const result = await fetchJsonResilient(url, { skipRelays: Boolean(proxy) })
+  return validate(result.status, result.body, result.statusText)
 }
 
 /* ---------------------------------------------------------------------------
@@ -390,10 +116,7 @@ export function clearApiCache() {
 export function __resetApiState() {
   responseCache.clear()
   inflight.clear()
-  corsBlocked = false
-  workingRelay = null
-  relayCooldownUntil.fill(0)
-  relayLastStart.fill(0)
+  __resetCorsState()
 }
 
 async function request(path, params) {
@@ -442,6 +165,7 @@ function normalizeManga(entity) {
     availableLanguages: attributes.availableTranslatedLanguages ?? [],
     coverUrl: coverFileName ? coverUrl(id, coverFileName) : null,
     coverThumbUrl: coverFileName ? coverUrl(id, coverFileName, 256) : null,
+    source: 'mangadex',
   }
 }
 
