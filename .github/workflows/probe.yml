@@ -9,31 +9,36 @@ jobs:
       - name: Probe every source and relay
         run: |
           UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
+          ORIGIN='https://0xmortuex.github.io'
           probe() {
             local name="$1" url="$2"
-            local meta body
-            meta=$(curl -sS -o /tmp/body -D /tmp/headers -w '%{http_code} in %{time_total}s' --max-time 20 -H 'Accept: application/json' -A "$UA" "$url" 2>&1 | tail -1)
+            local meta body acao
+            meta=$(curl -sS -o /tmp/body -D /tmp/headers -w '%{http_code} in %{time_total}s' --max-time 25 \
+              -H 'Accept: application/json' -H "Origin: $ORIGIN" -A "$UA" "$url" 2>&1 | tail -1)
             body=$(head -c 120 /tmp/body | tr '\n\r' '  ')
-            local acao
             acao=$(grep -i '^access-control-allow-origin' /tmp/headers | tr -d '\r' || true)
-            printf '=== %-16s %s | %s\n    body: %s\n' "$name" "$meta" "${acao:-no-ACAO-header}" "$body"
+            printf '=== %-18s %s | %s\n    body: %s\n' "$name" "$meta" "${acao:-no-ACAO}" "$body"
+            : > /tmp/body
           }
           MD='https://api.mangadex.org/manga?limit=1'
           CK='https://api.comick.fun/v1.0/search?q=naruto&limit=1&tachiyomi=true'
           ENC_MD=$(python3 -c "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=''))" "$MD")
-          ENC_CK=$(python3 -c "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=''))" "$CK")
 
-          probe direct-mangadex "$MD"
-          probe direct-comick "$CK"
-          probe comick-top 'https://api.comick.fun/top?type=trending&comic_types=manga&accept_mature_content=false'
-          probe mangadex-popular 'https://api.mangadex.org/manga?limit=2&order%5BfollowedCount%5D=desc&includes%5B%5D=cover_art'
+          echo '--- direct sources (WITH Origin header: ACAO presence is the CORS truth) ---'
+          probe md-ping 'https://api.mangadex.org/ping'
+          probe md-manga "$MD"
+          probe md-manga-retry "$MD"
+          probe ck-search "$CK"
+          probe jikan-top 'https://api.jikan.moe/v4/top/manga?limit=5'
+          probe kitsu 'https://kitsu.io/api/edge/manga?page%5Blimit%5D=1'
 
-          probe allorigins-md "https://api.allorigins.win/raw?url=$ENC_MD"
-          probe allorigins-ck "https://api.allorigins.win/raw?url=$ENC_CK"
-          probe alloriginsjson "https://api.allorigins.win/get?url=$ENC_MD"
-          probe codetabs-md "https://api.codetabs.com/v1/proxy?quest=$ENC_MD"
-          probe codetabs-ck "https://api.codetabs.com/v1/proxy?quest=$ENC_CK"
-          probe corsproxy-md "https://corsproxy.io/?url=$ENC_MD"
-          probe cors-eu-md "https://cors.eu.org/$MD"
-          probe cors-lol-md "https://api.cors.lol/?url=$ENC_MD"
-          probe htmldriven-md "https://cors-proxy.htmldriven.com/?url=$ENC_MD"
+          echo '--- relay candidates wrapping the mangadex URL ---'
+          probe allorigins-raw "https://api.allorigins.win/raw?url=$ENC_MD"
+          probe allorigins-json "https://api.allorigins.win/get?url=$ENC_MD"
+          probe codetabs "https://api.codetabs.com/v1/proxy?quest=$ENC_MD"
+          probe test-cors-wd "https://test.cors.workers.dev/?$MD"
+          probe corsproxy-org "https://corsproxy.org/?url=$ENC_MD"
+          probe corsmirror "https://corsmirror.com/v1?url=$ENC_MD"
+          probe corsfix "https://proxy.corsfix.com/?$MD"
+          probe jina-reader "https://r.jina.ai/$MD"
+          probe whateverorigin "http://www.whateverorigin.org/get?url=$ENC_MD"
