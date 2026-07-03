@@ -97,6 +97,17 @@ export async function searchManga(title, opts = {}) {
 }
 
 /**
+ * Lightweight type-ahead suggestions. Single-source (MangaDex has the best
+ * title search) and small so it stays cheap on the relay budget; repeats
+ * hit the request cache.
+ */
+export async function suggestManga(title, { contentRatings, availableLanguages } = {}) {
+  if (USING_FIXTURES) return (await api.searchManga(title, { limit: 5 })).items
+  const result = await real.searchManga(title, { limit: 5, contentRatings, availableLanguages })
+  return result.items
+}
+
+/**
  * Homepage rails. MangaDex first (its popularity data is richer); Comick's
  * /top lists as fallback when MangaDex is unreachable. Resolves [] instead
  * of throwing — the homepage hides empty rails rather than erroring.

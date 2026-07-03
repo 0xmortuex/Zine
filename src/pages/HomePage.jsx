@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { AnimatePresence, motion } from 'motion/react'
 import clsx from 'clsx'
 import PageTransition from '../components/PageTransition'
@@ -10,6 +10,7 @@ import ErrorState from '../components/ErrorState'
 import Button from '../components/ui/Button'
 import Icon from '../components/ui/Icon'
 import { useMangaSearch } from '../hooks/useMangaSearch'
+import { useSuggestions } from '../hooks/useSuggestions'
 import { useLibrary } from '../store/useLibrary'
 import { useSettings } from '../store/useSettings'
 import { toast } from '../store/useToasts'
@@ -81,6 +82,14 @@ function SearchTab() {
     useMangaSearch()
   const [input, setInput] = useState('')
   const [params] = useSearchParams()
+  const navigate = useNavigate()
+
+  // Type-ahead suggestions with keyboard navigation.
+  const suggestions = useSuggestions(input)
+  const [suggestOpen, setSuggestOpen] = useState(false)
+  const [activeIndex, setActiveIndex] = useState(-1)
+  useEffect(() => setActiveIndex(-1), [suggestions])
+  const showSuggestions = suggestOpen && suggestions.length > 0 && input.trim().length >= 2
 
   // ?q= deep links (e.g. a MAL rail card handing off to a title search).
   const linkedQuery = params.get('q')
@@ -94,7 +103,29 @@ function SearchTab() {
 
   function handleSubmit(event) {
     event.preventDefault()
+    setSuggestOpen(false)
     search(input)
+  }
+
+  function pickSuggestion(manga) {
+    setSuggestOpen(false)
+    navigate(`/manga/${manga.id}`)
+  }
+
+  function handleKeyDown(event) {
+    if (!showSuggestions) return
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      setActiveIndex((i) => Math.min(i + 1, suggestions.length - 1))
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      setActiveIndex((i) => Math.max(i - 1, -1))
+    } else if (event.key === 'Enter' && activeIndex >= 0) {
+      event.preventDefault()
+      pickSuggestion(suggestions[activeIndex])
+    } else if (event.key === 'Escape') {
+      setSuggestOpen(false)
+    }
   }
 
   return (
@@ -111,11 +142,64 @@ function SearchTab() {
             <input
               type="search"
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                setInput(e.target.value)
+                setSuggestOpen(true)
+              }}
+              onFocus={() => setSuggestOpen(true)}
+              onBlur={() => setTimeout(() => setSuggestOpen(false), 150)}
+              onKeyDown={handleKeyDown}
               placeholder="Title, e.g. “one punch man”…"
               className="w-full bg-transparent px-3 py-2.5 text-sm outline-none placeholder:text-muted"
+              role="combobox"
+              aria-expanded={showSuggestions}
+              aria-autocomplete="list"
             />
           </div>
+
+          {/* Type-ahead dropdown */}
+          {showSuggestions && (
+            <ul
+              role="listbox"
+              className="frosted absolute inset-x-0 top-full z-30 mt-2 overflow-hidden rounded-lg border border-border bg-surface shadow-2xl"
+            >
+              {suggestions.map((manga, index) => (
+                <li key={manga.id} role="option" aria-selected={index === activeIndex}>
+                  <button
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => pickSuggestion(manga)}
+                    onMouseEnter={() => setActiveIndex(index)}
+                    className={clsx(
+                      'flex w-full items-center gap-3 border-l-2 px-3 py-2 text-left',
+                      index === activeIndex
+                        ? 'border-accent bg-surface-raised'
+                        : 'border-transparent',
+                    )}
+                  >
+                    <span className="block h-12 w-8 shrink-0 overflow-hidden rounded border border-border bg-surface-raised">
+                      {manga.coverThumbUrl && (
+                        <img
+                          src={manga.coverThumbUrl}
+                          alt=""
+                          referrerPolicy="no-referrer"
+                          loading="lazy"
+                          className="h-full w-full object-cover"
+                        />
+                      )}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">{manga.title}</span>
+                      <span className="block text-xs text-muted">
+                        {[manga.year, manga.status].filter(Boolean).join(' · ')}
+                      </span>
+                    </span>
+                    <Icon name="chevronRight" size={14} className="shrink-0 text-muted" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
         <Button type="submit" variant="primary" disabled={loading}>
           {loading ? 'Searching…' : 'Search'}
