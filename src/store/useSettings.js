@@ -28,7 +28,8 @@ export const useSettings = create(
         direction: 'rtl', // 'rtl' (manga) | 'ltr'
         dataSaver: false,
         preloadCount: 3,
-        autoplayInterval: 8, // seconds per page, 1–60
+        autoplayInterval: 8, // base seconds per page, 1–60
+        smartTiming: true, // scale autoplay per page by visual density/shape
         autoScrollSpeed: 120, // px/sec in vertical mode, 40–400
         tapToPause: true,
       },

@@ -10,6 +10,7 @@ export const PAGE_SET_TTL_MS = 12 * 60 * 1000
 export function createPreloader(urls) {
   const status = new Map() // url -> 'loading' | 'done' | 'error'
   const waiters = new Map() // url -> [resolve...]
+  const images = new Map() // url -> Image (kept for page-timing analysis)
 
   function warm(url) {
     if (!url || status.has(url)) return
@@ -19,6 +20,7 @@ export function createPreloader(urls) {
     img.onload = () => settle(url, 'done')
     img.onerror = () => settle(url, 'error')
     img.src = url
+    images.set(url, img)
   }
 
   function settle(url, result) {
@@ -37,6 +39,10 @@ export function createPreloader(urls) {
     },
     isReady(index) {
       return status.get(urls[index]) === 'done'
+    },
+    /** The (loaded or loading) Image element for a page, if warmed. */
+    imageOf(index) {
+      return images.get(urls[index]) ?? null
     },
     /** Resolves when the page at index finishes loading (or errored). */
     whenReady(index) {

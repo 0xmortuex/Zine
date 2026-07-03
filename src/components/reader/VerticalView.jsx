@@ -5,8 +5,19 @@ import { forwardRef, useEffect, useRef } from 'react'
  * loading="lazy" with aspect-ratio placeholder boxes to avoid scroll jank.
  * Reports the page currently in view via IntersectionObserver.
  */
-const VerticalView = forwardRef(function VerticalView({ urls, onPageInView, onTap }, containerRef) {
+const VerticalView = forwardRef(function VerticalView(
+  { urls, onPageInView, onTap, initialPage = 0 },
+  containerRef,
+) {
   const pageRefs = useRef([])
+
+  // Jump to the resume position once per chapter mount.
+  useEffect(() => {
+    if (initialPage > 0) {
+      pageRefs.current[initialPage]?.scrollIntoView({ block: 'start' })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urls])
 
   useEffect(() => {
     const root = containerRef?.current

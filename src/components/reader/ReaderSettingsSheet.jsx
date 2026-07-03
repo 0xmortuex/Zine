@@ -92,6 +92,15 @@ export default function ReaderSettingsSheet({ open, onClose }) {
                 step={reader.mode === 'paged' ? 1 : 10}
                 format={(v) => (reader.mode === 'paged' ? `${v}s` : `${v}px/s`)}
               />
+              {reader.mode === 'paged' && (
+                <Row label="Smart page timing">
+                  <Toggle
+                    checked={reader.smartTiming}
+                    onChange={(smartTiming) => setReader({ smartTiming })}
+                    label="Smart page timing"
+                  />
+                </Row>
+              )}
               <Row label="Data saver">
                 <Toggle
                   checked={reader.dataSaver}

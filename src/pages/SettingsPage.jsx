@@ -347,6 +347,17 @@ function ReaderSettings() {
         format={(v) => `${v}s`}
       />
 
+      <FieldRow
+        label="Smart page timing"
+        hint="Analyzes each page and scales the timer — dense, tall, or busy pages get more reading time."
+      >
+        <Toggle
+          checked={reader.smartTiming}
+          onChange={(smartTiming) => setReader({ smartTiming })}
+          label="Smart page timing"
+        />
+      </FieldRow>
+
       <Slider
         label="Auto-scroll speed"
         value={reader.autoScrollSpeed}

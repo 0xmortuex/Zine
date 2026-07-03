@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { AnimatePresence, motion } from 'motion/react'
+import clsx from 'clsx'
 import PagedView from '../components/reader/PagedView'
 import VerticalView from '../components/reader/VerticalView'
 import ReaderControls from '../components/reader/ReaderControls'
@@ -16,7 +17,9 @@ import { useKeyboard } from '../hooks/useKeyboard'
 import { useFullscreen } from '../hooks/useFullscreen'
 import { useSettings } from '../store/useSettings'
 import { useLibrary } from '../store/useLibrary'
+import { useLayoutMode } from '../hooks/useLayoutMode'
 import { createPreloader, isStale } from '../lib/preload'
+import { estimateReadSeconds } from '../lib/pageTiming'
 import { dedupeChapters, findPrevNext, formatChapterLabel } from '../lib/chapters'
 
 const CHROME_IDLE_MS = 2500
@@ -26,6 +29,7 @@ const EMPTY_READ = {}
 export default function ReaderPage() {
   const { mangaId, chapterId } = useParams()
   const navigate = useNavigate()
+  const isMobile = useLayoutMode() === 'mobile'
 
   const reader = useSettings((s) => s.reader)
   const setReader = useSettings((s) => s.setReader)
@@ -66,10 +70,17 @@ export default function ReaderPage() {
     try {
       const urls = await getChapterPages(chapterId, { dataSaver: reader.dataSaver })
       setPageSet({ urls, fetchedAt: Date.now() })
+      // Resume where the reader left off in THIS chapter; new chapters
+      // start at page 1. Only on load — mid-read refetches keep the page.
+      const saved = useLibrary.getState().progress[mangaId]
+      setPage((current) => {
+        const target = saved?.chapterId === chapterId ? (saved.page ?? 0) : current
+        return Math.min(Math.max(target, current), urls.length - 1)
+      })
     } catch (err) {
       setPagesError(err)
     }
-  }, [chapterId, reader.dataSaver])
+  }, [chapterId, mangaId, reader.dataSaver])
 
   useEffect(() => {
     refetchedOnce.current = false
@@ -161,6 +172,26 @@ export default function ReaderPage() {
 
   /* ------------------------------- autoplay ------------------------------ */
 
+  /* Smart per-page timing: once the current page's image is loaded,
+   * estimate how long an average reader needs on it (visual density where
+   * pixels are readable; page shape otherwise). */
+  const [smartSeconds, setSmartSeconds] = useState(null)
+  useEffect(() => {
+    setSmartSeconds(null)
+    if (!preloader || reader.mode !== 'paged' || !reader.smartTiming) return
+    let cancelled = false
+    preloader.whenReady(page).then(() => {
+      if (cancelled) return
+      const img = preloader.imageOf(page)
+      if (img) setSmartSeconds(estimateReadSeconds(img, reader.autoplayInterval))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [preloader, page, reader.mode, reader.smartTiming, reader.autoplayInterval])
+
+  const effectiveSeconds = reader.smartTiming ? (smartSeconds ?? reader.autoplayInterval) : reader.autoplayInterval
+
   const autoplayEnabled =
     pageCount > 0 && !sheetOpen && !interstitial && reader.mode === 'paged'
 
@@ -179,7 +210,7 @@ export default function ReaderPage() {
   }, [page, pageCount, next, preloader])
 
   const autoplay = useAutoplay({
-    duration: reader.autoplayInterval * 1000,
+    duration: effectiveSeconds * 1000,
     onComplete: handleAutoplayComplete,
     resetKey: `${chapterId}:${page}`,
     enabled: autoplayEnabled,
@@ -304,7 +335,12 @@ export default function ReaderPage() {
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.2 }}
-      onMouseMove={pokeChrome}
+      onPointerMove={(e) => {
+        // Only real mouse motion revives the chrome: mobile browsers emit a
+        // synthetic pointer/mouse move right before tap-clicks, which raced
+        // the tap's show/hide toggle — the menu flashed on and instantly off.
+        if (e.pointerType === 'mouse') pokeChrome()
+      }}
       className="fixed inset-0 flex flex-col bg-bg"
     >
       {pagesError && (
@@ -344,6 +380,7 @@ export default function ReaderPage() {
               urls={urls}
               onPageInView={setPage}
               onTap={handleCenterTap}
+              initialPage={page}
             />
           )}
         </div>
@@ -391,7 +428,12 @@ export default function ReaderPage() {
       {/* Bottom chrome: floating control capsule */}
       <AnimatePresence>
         {chromeVisible && pageSet && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-4 z-30 flex justify-center px-4">
+          <div
+            className={clsx(
+              'pointer-events-none absolute inset-x-0 z-30 flex justify-center',
+              isMobile ? 'bottom-2 px-2' : 'bottom-4 px-4',
+            )}
+          >
             <ReaderControls
               page={page}
               pageCount={pageCount}
@@ -402,6 +444,8 @@ export default function ReaderPage() {
                 reader.mode === 'paged' ? autoplay.subscribeProgress : subscribeVertical
               }
               interval={reader.autoplayInterval}
+              effectiveSeconds={reader.mode === 'paged' ? effectiveSeconds : null}
+              isMobile={isMobile}
               onIntervalChange={(autoplayInterval) => setReader({ autoplayInterval })}
               onForward={goForward}
               onBack={goBack}
