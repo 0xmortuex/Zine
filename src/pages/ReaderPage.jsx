@@ -401,6 +401,7 @@ export default function ReaderPage() {
               onCenterTap={handleCenterTap}
               onImageError={handleImageError}
               isRtl={isRtl}
+              isMobile={isMobile}
             />
           ) : (
             <VerticalView

@@ -1,5 +1,6 @@
 import { AnimatePresence, motion } from 'motion/react'
 import clsx from 'clsx'
+import Icon from '../ui/Icon'
 
 const FIT_CLASSES = {
   height: 'max-h-full w-auto',
@@ -9,13 +10,32 @@ const FIT_CLASSES = {
 
 /**
  * Single-page mode: direction-aware spring slide between pages, invisible
- * tap zones (back | pause | forward, honoring RTL).
+ * click/tap zones. On phones the middle HALF toggles the chrome (big thumb
+ * target); on desktop the page-turn zones take 40% each side — the pointer
+ * is precise, the panel already reveals on mouse move, and side zones show
+ * a faint chevron on hover so they're discoverable.
  */
-export default function PagedView({ url, page, slideDirection, fit, onForward, onBack, onCenterTap, onImageError, isRtl }) {
+export default function PagedView({
+  url,
+  page,
+  slideDirection,
+  fit,
+  onForward,
+  onBack,
+  onCenterTap,
+  onImageError,
+  isRtl,
+  isMobile,
+}) {
   const offset = slideDirection * 48
 
   return (
-    <div className={clsx('relative flex h-full w-full items-center', fit === 'width' ? 'overflow-y-auto justify-center' : 'justify-center overflow-hidden')}>
+    <div
+      className={clsx(
+        'relative flex h-full w-full items-center',
+        fit === 'width' ? 'justify-center overflow-y-auto' : 'justify-center overflow-hidden',
+      )}
+    >
       <AnimatePresence mode="popLayout" custom={offset}>
         <motion.img
           key={page}
@@ -32,20 +52,35 @@ export default function PagedView({ url, page, slideDirection, fit, onForward, o
         />
       </AnimatePresence>
 
-      {/* Tap zones: outer quarters turn pages, the wide middle half toggles
-          chrome/autoplay — a big, easy target on phones. */}
-      <div className="absolute inset-0 z-10 grid grid-cols-[1fr_2fr_1fr]">
+      <div
+        className={clsx(
+          'absolute inset-0 z-10 grid',
+          isMobile ? 'grid-cols-[1fr_2fr_1fr]' : 'grid-cols-[2fr_1fr_2fr]',
+        )}
+      >
         <button
           aria-label={isRtl ? 'Next page' : 'Previous page'}
           onClick={isRtl ? onForward : onBack}
-          className="cursor-w-resize outline-none"
-        />
+          className="group flex cursor-w-resize items-center justify-start pl-4 outline-none"
+        >
+          {!isMobile && (
+            <span className="rounded-full bg-surface/70 p-2 text-muted opacity-0 transition-opacity duration-150 group-hover:opacity-80">
+              <Icon name="chevronLeft" size={22} />
+            </span>
+          )}
+        </button>
         <button aria-label="Toggle controls" onClick={onCenterTap} className="outline-none" />
         <button
           aria-label={isRtl ? 'Previous page' : 'Next page'}
           onClick={isRtl ? onBack : onForward}
-          className="cursor-e-resize outline-none"
-        />
+          className="group flex cursor-e-resize items-center justify-end pr-4 outline-none"
+        >
+          {!isMobile && (
+            <span className="rounded-full bg-surface/70 p-2 text-muted opacity-0 transition-opacity duration-150 group-hover:opacity-80">
+              <Icon name="chevronRight" size={22} />
+            </span>
+          )}
+        </button>
       </div>
     </div>
   )

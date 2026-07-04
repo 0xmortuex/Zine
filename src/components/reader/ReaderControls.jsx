@@ -43,14 +43,16 @@ export default function ReaderControls({
       exit={{ y: 24, opacity: 0 }}
       transition={{ type: 'spring', stiffness: 380, damping: 32 }}
       className={clsx(
-        'frosted pointer-events-auto flex flex-col gap-1.5 rounded-2xl border border-border bg-surface shadow-2xl',
-        isMobile ? 'w-full px-3 py-2.5' : 'px-4 py-3',
+        'frosted pointer-events-auto flex flex-col rounded-2xl border border-border bg-surface shadow-2xl',
+        isMobile ? 'w-full gap-1.5 px-3 py-2.5' : 'w-full max-w-2xl gap-2.5 px-6 py-4',
       )}
     >
       {/* Scrubber */}
       {mode === 'paged' && pageCount > 1 && (
         <div className="flex items-center gap-2">
-          <span className="tnum shrink-0 text-[0.65rem] font-bold text-muted">{page + 1}</span>
+          <span className={clsx('tnum shrink-0 font-bold text-muted', isMobile ? 'text-[0.65rem]' : 'text-xs')}>
+            {page + 1}
+          </span>
           {useSlider ? (
             <input
               type="range"
@@ -60,7 +62,7 @@ export default function ReaderControls({
               dir={isRtl ? 'rtl' : 'ltr'}
               onChange={(e) => onScrub(Number(e.target.value))}
               aria-label="Page"
-              className="focus-ink h-6 min-w-0 flex-1 cursor-pointer touch-none"
+              className={clsx('focus-ink min-w-0 flex-1 cursor-pointer touch-none', isMobile ? 'h-6' : 'h-7')}
               style={{ accentColor: 'var(--accent)' }}
             />
           ) : (
@@ -87,7 +89,9 @@ export default function ReaderControls({
               ))}
             </div>
           )}
-          <span className="tnum shrink-0 text-[0.65rem] font-bold text-muted">{pageCount}</span>
+          <span className={clsx('tnum shrink-0 font-bold text-muted', isMobile ? 'text-[0.65rem]' : 'text-xs')}>
+            {pageCount}
+          </span>
         </div>
       )}
 
@@ -95,27 +99,32 @@ export default function ReaderControls({
         <IconButton
           icon="skipBack"
           label="Previous chapter"
+          size={isMobile ? 20 : 24}
           disabled={!hasPrevChapter}
           onClick={onPrevChapter}
           className={clsx(!hasPrevChapter && 'opacity-30')}
         />
-        <IconButton icon="pageBack" label="Back" onClick={onBack} />
+        <IconButton icon="pageBack" label="Back" size={isMobile ? 20 : 24} onClick={onBack} />
 
         {/* Play/pause with the autoplay ring around it */}
         <motion.button
           whileTap={{ scale: 0.88 }}
           onClick={onToggleAutoplay}
           aria-label={playing ? 'Pause autoplay' : 'Start autoplay'}
-          className="focus-ink relative mx-1 flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-accent text-accent-fg"
+          className={clsx(
+            'focus-ink relative mx-1 flex shrink-0 items-center justify-center rounded-full bg-accent text-accent-fg',
+            isMobile ? 'h-12 w-12' : 'h-14 w-14',
+          )}
         >
-          <AutoplayRing subscribeProgress={subscribeProgress} size={46} />
-          <Icon name={playing ? 'pause' : 'play'} size={20} filled={!playing} />
+          <AutoplayRing subscribeProgress={subscribeProgress} size={isMobile ? 46 : 54} />
+          <Icon name={playing ? 'pause' : 'play'} size={isMobile ? 20 : 24} filled={!playing} />
         </motion.button>
 
-        <IconButton icon="pageForward" label="Forward" onClick={onForward} />
+        <IconButton icon="pageForward" label="Forward" size={isMobile ? 20 : 24} onClick={onForward} />
         <IconButton
           icon="skipForward"
           label="Next chapter"
+          size={isMobile ? 20 : 24}
           disabled={!hasNextChapter}
           onClick={onNextChapter}
           className={clsx(!hasNextChapter && 'opacity-30')}
@@ -136,7 +145,7 @@ export default function ReaderControls({
           >
             −
           </button>
-          <span className="tnum w-9 text-center text-xs leading-tight font-bold">
+          <span className={clsx('tnum text-center leading-tight font-bold', isMobile ? 'w-9 text-xs' : 'w-11 text-sm')}>
             {effectiveSeconds != null && Math.round(effectiveSeconds) !== interval ? (
               <>
                 {Math.round(effectiveSeconds)}s
