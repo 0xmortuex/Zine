@@ -281,22 +281,22 @@ export default function ReaderPage() {
 
   /* ----------------------------- chrome idle -----------------------------
    * Predictable rules:
-   *  - While paused / reading manually, the panel NEVER auto-hides; a
-   *    center tap toggles it.
-   *  - While autoplay/auto-scroll runs, it auto-hides after 4s with no
-   *    interaction; touching any control resets the clock.
+   *  - The panel ALWAYS auto-hides after 4s without interaction — reading
+   *    (manual or autoplay) should be chrome-free. A center tap toggles it.
+   *  - It stays put while the mouse rests ON it or the settings sheet is
+   *    open; any interaction with a control resets the clock.
    *  - Only real mouse movement summons it passively (mobile browsers fire
    *    synthetic mouse events around taps, which must not fight the tap
    *    toggle).
    * --------------------------------------------------------------------- */
 
-  const playingRef = useRef(false)
+  const chromeHover = useRef(false) // mouse resting on the chrome — never hide under the cursor
+  const sheetOpenRef = useRef(false)
 
   const armHide = useCallback(() => {
     clearTimeout(idleTimer.current)
-    if (playingRef.current) {
-      idleTimer.current = setTimeout(() => setChromeVisible(false), CHROME_IDLE_MS)
-    }
+    if (chromeHover.current || sheetOpenRef.current) return
+    idleTimer.current = setTimeout(() => setChromeVisible(false), CHROME_IDLE_MS)
   }, [])
 
   /** Any interaction with the chrome itself keeps it alive. */
@@ -306,12 +306,31 @@ export default function ReaderPage() {
   }, [armHide])
 
   useEffect(() => {
-    playingRef.current = playing
-    if (playing) armHide()
-    else clearTimeout(idleTimer.current) // paused → panel stays until dismissed
+    sheetOpenRef.current = sheetOpen
+    if (sheetOpen) clearTimeout(idleTimer.current)
+    else armHide()
+  }, [sheetOpen, armHide])
+
+  useEffect(() => {
+    armHide() // on mount and whenever playback state flips
   }, [playing, armHide])
 
   useEffect(() => () => clearTimeout(idleTimer.current), [])
+
+  const chromeHoverProps = {
+    onPointerEnter: (e) => {
+      if (e.pointerType === 'mouse') {
+        chromeHover.current = true
+        clearTimeout(idleTimer.current)
+      }
+    },
+    onPointerLeave: (e) => {
+      if (e.pointerType === 'mouse') {
+        chromeHover.current = false
+        armHide()
+      }
+    },
+  }
 
   const pokeChrome = useCallback(() => {
     setChromeVisible(true)
@@ -321,8 +340,7 @@ export default function ReaderPage() {
   const handleCenterTap = useCallback(() => {
     if (reader.tapToPause && playing) {
       toggleAutoplay() // pause AND surface the controls — always predictable
-      clearTimeout(idleTimer.current)
-      setChromeVisible(true)
+      keepChromeAlive()
       return
     }
     setChromeVisible((visible) => {
@@ -330,7 +348,7 @@ export default function ReaderPage() {
       if (!visible) armHide()
       return !visible
     })
-  }, [reader.tapToPause, playing, toggleAutoplay, armHide])
+  }, [reader.tapToPause, playing, toggleAutoplay, armHide, keepChromeAlive])
 
   /* ------------------------------- keyboard ------------------------------ */
 
@@ -342,6 +360,8 @@ export default function ReaderPage() {
     f: toggleFullscreen,
     F: toggleFullscreen,
     m: () => setReader({ mode: reader.mode === 'paged' ? 'vertical' : 'paged' }),
+    z: () => setReader({ fit: reader.fit === 'cover' ? 'height' : 'cover' }),
+    Z: () => setReader({ fit: reader.fit === 'cover' ? 'height' : 'cover' }),
     ',': () => setReader({ autoplayInterval: Math.max(1, reader.autoplayInterval - 1) }),
     '.': () => setReader({ autoplayInterval: Math.min(60, reader.autoplayInterval + 1) }),
     Escape: () => navigate(`/manga/${mangaId}`),
@@ -424,6 +444,7 @@ export default function ReaderPage() {
             exit={{ y: -56, opacity: 0 }}
             transition={{ type: 'spring', stiffness: 380, damping: 34 }}
             onPointerDownCapture={keepChromeAlive}
+            {...chromeHoverProps}
             className="frosted absolute inset-x-0 top-0 z-30 flex items-center gap-3 border-b border-border bg-surface px-4 py-2.5"
           >
             <Link
@@ -460,6 +481,7 @@ export default function ReaderPage() {
         {chromeVisible && pageSet && (
           <div
             onPointerDownCapture={keepChromeAlive}
+            {...chromeHoverProps}
             className={clsx(
               'pointer-events-none absolute inset-x-0 z-30 flex justify-center',
               isMobile ? 'bottom-2 px-2' : 'bottom-4 px-4',

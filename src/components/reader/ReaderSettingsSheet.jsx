@@ -63,6 +63,7 @@ export default function ReaderSettingsSheet({ open, onClose }) {
                         { value: 'height', label: 'Height' },
                         { value: 'width', label: 'Width' },
                         { value: 'original', label: 'Original' },
+                        { value: 'cover', label: 'Fill' },
                       ]}
                     />
                   </Row>

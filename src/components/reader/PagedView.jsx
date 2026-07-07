@@ -3,9 +3,11 @@ import clsx from 'clsx'
 import Icon from '../ui/Icon'
 
 const FIT_CLASSES = {
-  height: 'max-h-full w-auto',
-  width: 'w-full max-w-4xl h-auto',
-  original: '',
+  height: 'max-h-full w-auto object-contain',
+  width: 'w-full max-w-4xl h-auto object-contain',
+  original: 'object-contain',
+  // Fill the whole screen edge-to-edge, cropping overflow — no letterbox.
+  cover: 'h-full w-full object-cover',
 }
 
 /**
@@ -32,8 +34,8 @@ export default function PagedView({
   return (
     <div
       className={clsx(
-        'relative flex h-full w-full items-center',
-        fit === 'width' ? 'justify-center overflow-y-auto' : 'justify-center overflow-hidden',
+        'relative flex h-full w-full items-center justify-center',
+        fit === 'width' ? 'overflow-y-auto' : 'overflow-hidden',
       )}
     >
       <AnimatePresence mode="popLayout" custom={offset}>
@@ -48,7 +50,7 @@ export default function PagedView({
           animate={{ opacity: 1, x: 0 }}
           exit={{ opacity: 0, x: -offset }}
           transition={{ type: 'spring', stiffness: 420, damping: 38 }}
-          className={clsx('object-contain select-none', FIT_CLASSES[fit])}
+          className={clsx('select-none', FIT_CLASSES[fit])}
         />
       </AnimatePresence>
 
