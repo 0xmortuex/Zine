@@ -101,8 +101,9 @@ export default function ReaderPage() {
    * Only meaningful in paged mode. */
   const isSpread = reader.mode === 'paged' && reader.fit === 'spread' && orientation === 'landscape'
   const step = isSpread ? 2 : 1
-  // In portrait, Book falls back to full-width Fill; the spread branch is off.
-  const displayFit = reader.fit === 'spread' && !isSpread ? 'cover' : reader.fit
+  // In portrait, Book fills the whole tall screen (fillscreen) instead of
+  // fitting to width, which would leave dead space below a shorter page.
+  const displayFit = reader.fit === 'spread' && !isSpread ? 'fillscreen' : reader.fit
 
   const preloader = useMemo(() => (pageSet ? createPreloader(pageSet.urls) : null), [pageSet])
 

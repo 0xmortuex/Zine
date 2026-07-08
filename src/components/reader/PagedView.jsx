@@ -10,6 +10,10 @@ const FIT_CLASSES = {
   // Tall pages become taller than the viewport — the shell scrolls vertically
   // so the whole page is readable, nothing cropped.
   cover: 'w-full h-auto object-contain',
+  // Fill the whole viewport with no dead space — used by Book on a portrait
+  // screen, where the page and the screen are close enough in shape that the
+  // crop is tiny. Scales to cover both axes, trimming the small overflow.
+  fillscreen: 'h-full w-full object-cover',
 }
 
 const SLIDE = { type: 'spring', stiffness: 420, damping: 38 }
