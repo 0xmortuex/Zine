@@ -6,8 +6,10 @@ const FIT_CLASSES = {
   height: 'max-h-full w-auto object-contain',
   width: 'w-full max-w-4xl h-auto object-contain',
   original: 'object-contain',
-  // Fill the whole screen edge-to-edge, cropping overflow — no letterbox.
-  cover: 'h-full w-full object-cover',
+  // Fill the FULL screen width edge-to-edge (no max-width cap, no side bars).
+  // Tall pages become taller than the viewport — the shell scrolls vertically
+  // so the whole page is readable, nothing cropped.
+  cover: 'w-full h-auto object-contain',
 }
 
 /**
@@ -34,8 +36,14 @@ export default function PagedView({
   return (
     <div
       className={clsx(
-        'relative flex h-full w-full items-center justify-center',
-        fit === 'width' ? 'overflow-y-auto' : 'overflow-hidden',
+        'relative flex h-full w-full justify-center',
+        // Full-width Fill scrolls from the top so no part of a tall page is
+        // stranded above the fold; other fits stay vertically centered.
+        fit === 'cover'
+          ? 'items-start overflow-y-auto'
+          : fit === 'width'
+            ? 'items-center overflow-y-auto'
+            : 'items-center overflow-hidden',
       )}
     >
       <AnimatePresence mode="popLayout" custom={offset}>
