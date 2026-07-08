@@ -64,9 +64,16 @@ export default function ReaderSettingsSheet({ open, onClose }) {
                         { value: 'width', label: 'Width' },
                         { value: 'original', label: 'Original' },
                         { value: 'cover', label: 'Fill' },
+                        { value: 'spread', label: 'Book' },
                       ]}
                     />
                   </Row>
+                  {reader.fit === 'spread' && (
+                    <p className="-mt-3 text-xs text-muted">
+                      Book adapts to your screen: a two-page spread when it's wide,
+                      one full page when you pivot it to portrait.
+                    </p>
+                  )}
                   <Row label="Direction">
                     <SegmentedControl
                       label="Direction"

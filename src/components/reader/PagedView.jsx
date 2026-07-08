@@ -12,15 +12,24 @@ const FIT_CLASSES = {
   cover: 'w-full h-auto object-contain',
 }
 
+const SLIDE = { type: 'spring', stiffness: 420, damping: 38 }
+
 /**
  * Single-page mode: direction-aware spring slide between pages, invisible
  * click/tap zones. On phones the middle HALF toggles the chrome (big thumb
  * target); on desktop the page-turn zones take 40% each side — the pointer
  * is precise, the panel already reveals on mouse move, and side zones show
  * a faint chevron on hover so they're discoverable.
+ *
+ * When `spread` is set (Book mode on a landscape screen), two consecutive
+ * pages sit side by side like an open manga volume. In RTL the current page
+ * is on the RIGHT and the next page on the LEFT; `secondUrl` is that partner
+ * page (absent on a lone final page).
  */
 export default function PagedView({
   url,
+  secondUrl,
+  spread,
   page,
   slideDirection,
   fit,
@@ -32,6 +41,63 @@ export default function PagedView({
   isMobile,
 }) {
   const offset = slideDirection * 48
+
+  const tapZones = (
+    <div
+      className={clsx(
+        'absolute inset-0 z-10 grid',
+        isMobile ? 'grid-cols-[1fr_2fr_1fr]' : 'grid-cols-[2fr_1fr_2fr]',
+      )}
+    >
+      <button
+        aria-label={isRtl ? 'Next page' : 'Previous page'}
+        onClick={isRtl ? onForward : onBack}
+        className="group flex cursor-w-resize items-center justify-start pl-4 outline-none"
+      >
+        {!isMobile && (
+          <span className="rounded-full bg-surface/70 p-2 text-muted opacity-0 transition-opacity duration-150 group-hover:opacity-80">
+            <Icon name="chevronLeft" size={22} />
+          </span>
+        )}
+      </button>
+      <button aria-label="Toggle controls" onClick={onCenterTap} className="outline-none" />
+      <button
+        aria-label={isRtl ? 'Previous page' : 'Next page'}
+        onClick={isRtl ? onBack : onForward}
+        className="group flex cursor-e-resize items-center justify-end pr-4 outline-none"
+      >
+        {!isMobile && (
+          <span className="rounded-full bg-surface/70 p-2 text-muted opacity-0 transition-opacity duration-150 group-hover:opacity-80">
+            <Icon name="chevronRight" size={22} />
+          </span>
+        )}
+      </button>
+    </div>
+  )
+
+  if (spread) {
+    // RTL: right cell holds the current page, left cell the next one.
+    const leftUrl = isRtl ? secondUrl : url
+    const rightUrl = isRtl ? url : secondUrl
+    return (
+      <div className="relative flex h-full w-full items-center justify-center overflow-hidden">
+        <AnimatePresence mode="popLayout" custom={offset}>
+          <motion.div
+            key={page}
+            initial={{ opacity: 0, x: offset }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -offset }}
+            transition={SLIDE}
+            className="flex h-full w-full items-center justify-center"
+          >
+            <SpreadHalf url={leftUrl} alt={`Page ${page + (isRtl ? 2 : 1)}`} onImageError={onImageError} align="end" />
+            <SpreadHalf url={rightUrl} alt={`Page ${page + (isRtl ? 1 : 2)}`} onImageError={onImageError} align="start" />
+          </motion.div>
+        </AnimatePresence>
+        {tapZones}
+      </div>
+    )
+  }
 
   return (
     <div
@@ -57,41 +123,36 @@ export default function PagedView({
           initial={{ opacity: 0, x: offset }}
           animate={{ opacity: 1, x: 0 }}
           exit={{ opacity: 0, x: -offset }}
-          transition={{ type: 'spring', stiffness: 420, damping: 38 }}
+          transition={SLIDE}
           className={clsx('select-none', FIT_CLASSES[fit])}
         />
       </AnimatePresence>
 
-      <div
-        className={clsx(
-          'absolute inset-0 z-10 grid',
-          isMobile ? 'grid-cols-[1fr_2fr_1fr]' : 'grid-cols-[2fr_1fr_2fr]',
-        )}
-      >
-        <button
-          aria-label={isRtl ? 'Next page' : 'Previous page'}
-          onClick={isRtl ? onForward : onBack}
-          className="group flex cursor-w-resize items-center justify-start pl-4 outline-none"
-        >
-          {!isMobile && (
-            <span className="rounded-full bg-surface/70 p-2 text-muted opacity-0 transition-opacity duration-150 group-hover:opacity-80">
-              <Icon name="chevronLeft" size={22} />
-            </span>
-          )}
-        </button>
-        <button aria-label="Toggle controls" onClick={onCenterTap} className="outline-none" />
-        <button
-          aria-label={isRtl ? 'Previous page' : 'Next page'}
-          onClick={isRtl ? onBack : onForward}
-          className="group flex cursor-e-resize items-center justify-end pr-4 outline-none"
-        >
-          {!isMobile && (
-            <span className="rounded-full bg-surface/70 p-2 text-muted opacity-0 transition-opacity duration-150 group-hover:opacity-80">
-              <Icon name="chevronRight" size={22} />
-            </span>
-          )}
-        </button>
-      </div>
+      {tapZones}
+    </div>
+  )
+}
+
+/** One half of a two-page spread; an absent page leaves its half blank so the
+ *  partner stays on its correct side (e.g. a lone final page hugs the spine). */
+function SpreadHalf({ url, alt, onImageError, align }) {
+  return (
+    <div
+      className={clsx(
+        'flex h-full w-1/2 items-center',
+        align === 'end' ? 'justify-end' : 'justify-start',
+      )}
+    >
+      {url && (
+        <img
+          src={url}
+          alt={alt}
+          referrerPolicy="no-referrer"
+          draggable={false}
+          onError={onImageError}
+          className="max-h-full max-w-full object-contain select-none"
+        />
+      )}
     </div>
   )
 }

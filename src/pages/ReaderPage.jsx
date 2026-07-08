@@ -18,6 +18,7 @@ import { useFullscreen } from '../hooks/useFullscreen'
 import { useSettings } from '../store/useSettings'
 import { useLibrary } from '../store/useLibrary'
 import { useLayoutMode } from '../hooks/useLayoutMode'
+import { useOrientation } from '../hooks/useOrientation'
 import { createPreloader, isStale } from '../lib/preload'
 import { estimateReadSeconds } from '../lib/pageTiming'
 import { dedupeChapters, findPrevNext, formatChapterLabel } from '../lib/chapters'
@@ -30,6 +31,7 @@ export default function ReaderPage() {
   const { mangaId, chapterId } = useParams()
   const navigate = useNavigate()
   const isMobile = useLayoutMode() === 'mobile'
+  const orientation = useOrientation()
 
   const reader = useSettings((s) => s.reader)
   const setReader = useSettings((s) => s.setReader)
@@ -92,6 +94,16 @@ export default function ReaderPage() {
   const urls = pageSet?.urls ?? []
   const pageCount = urls.length
 
+  /* ------------------------------ Book mode ------------------------------
+   * fit 'spread' = "Book, auto by orientation":
+   *  - landscape screen → two-page spread, turning two pages at a time;
+   *  - portrait (pivoted monitor) → one page filling the full width.
+   * Only meaningful in paged mode. */
+  const isSpread = reader.mode === 'paged' && reader.fit === 'spread' && orientation === 'landscape'
+  const step = isSpread ? 2 : 1
+  // In portrait, Book falls back to full-width Fill; the spread branch is off.
+  const displayFit = reader.fit === 'spread' && !isSpread ? 'cover' : reader.fit
+
   const preloader = useMemo(() => (pageSet ? createPreloader(pageSet.urls) : null), [pageSet])
 
   useEffect(() => {
@@ -151,7 +163,7 @@ export default function ReaderPage() {
     }
     if (page < pageCount - 1) {
       setSlideDirection(1)
-      setPage((p) => p + 1)
+      setPage((p) => Math.min(p + step, pageCount - 1))
       return true
     }
     if (next) {
@@ -159,16 +171,16 @@ export default function ReaderPage() {
       return true
     }
     return false
-  }, [page, pageCount, next, pageSet, loadPages])
+  }, [page, pageCount, next, pageSet, loadPages, step])
 
   const goBack = useCallback(() => {
     if (page > 0) {
       setSlideDirection(-1)
-      setPage((p) => p - 1)
+      setPage((p) => Math.max(p - step, 0))
     } else if (prev) {
       goToChapter(prev)
     }
-  }, [page, prev, goToChapter])
+  }, [page, prev, goToChapter, step])
 
   /* ------------------------------- autoplay ------------------------------ */
 
@@ -197,9 +209,9 @@ export default function ReaderPage() {
 
   const handleAutoplayComplete = useCallback(async () => {
     if (page < pageCount - 1) {
-      await preloader?.whenReady(page + 1) // hold at 100% until the image is in
+      await preloader?.whenReady(Math.min(page + step, pageCount - 1)) // hold at 100% until the image is in
       setSlideDirection(1)
-      setPage((p) => p + 1)
+      setPage((p) => Math.min(p + step, pageCount - 1))
       return true
     }
     if (next) {
@@ -207,7 +219,7 @@ export default function ReaderPage() {
       return true
     }
     return false // last page of last chapter — stop
-  }, [page, pageCount, next, preloader])
+  }, [page, pageCount, next, preloader, step])
 
   const autoplay = useAutoplay({
     duration: effectiveSeconds * 1000,
@@ -413,9 +425,11 @@ export default function ReaderPage() {
           {reader.mode === 'paged' ? (
             <PagedView
               url={urls[page]}
+              secondUrl={isSpread ? urls[page + 1] : undefined}
+              spread={isSpread}
               page={page}
               slideDirection={isRtl ? -slideDirection : slideDirection}
-              fit={reader.fit}
+              fit={displayFit}
               onForward={goForward}
               onBack={goBack}
               onCenterTap={handleCenterTap}
@@ -459,7 +473,11 @@ export default function ReaderPage() {
               <p className="truncate text-xs text-muted">{chapterLabel}</p>
             </div>
             <span className="tnum text-xs text-muted">
-              {pageCount ? `${page + 1} / ${pageCount}` : ''}
+              {pageCount
+                ? isSpread && urls[page + 1]
+                  ? `${page + 1}–${page + 2} / ${pageCount}`
+                  : `${page + 1} / ${pageCount}`
+                : ''}
             </span>
             <IconButton
               icon={reader.mode === 'paged' ? 'columns' : 'rows'}
