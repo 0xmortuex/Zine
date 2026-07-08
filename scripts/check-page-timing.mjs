@@ -20,6 +20,12 @@ assert.ok(sparse < BASE, `sparse (${sparse}) should be under base`)
 assert.ok(dense > BASE * 2, `dense (${dense}) should be well over 2x base`)
 assert.ok(dense / sparse > 2.5, 'dense pages should get at least 2.5x sparse pages')
 
+// A dialogue-dense standard page must clear ~3.5x base — enough real time to
+// read a full page of speech bubbles, not the old ~2.75x ceiling that left
+// text pages rushed.
+const dialogue = computeReadSeconds(BASE, 1.45, 0.9)
+assert.ok(dialogue > BASE * 3.5, `dialogue page (${dialogue}) should exceed 3.5x base`)
+
 // Hard floors/ceilings: never absurdly short or long.
 assert.ok(computeReadSeconds(1, 0.5, 0) >= 4, 'floor is 4s')
 assert.ok(computeReadSeconds(60, 6, 1) <= 120, 'ceiling is 120s')
