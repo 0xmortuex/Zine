@@ -20,10 +20,10 @@ export function computeReadSeconds(baseSeconds, aspect, busyness) {
   let multiplier = clamp(aspect / STANDARD_ASPECT, 0.8, 3)
   if (busyness != null) {
     // Sparse spreads run a touch under base; a full page of dialogue gets up
-    // to ~4.5x — reading a wall of speech bubbles genuinely takes that long,
+    // to ~6x — reading a wall of speech bubbles genuinely takes that long,
     // and readers strongly prefer lingering over being rushed past unread
     // text. Calibrated generous by design.
-    multiplier *= clamp(0.6 + busyness * 3.9, 0.6, 4.5)
+    multiplier *= clamp(0.6 + busyness * 5.4, 0.6, 6)
   }
   // Never under 4s (even a splash page deserves a look), never over 2min.
   return clamp(baseSeconds * multiplier, 4, 120)
@@ -44,8 +44,10 @@ export function computeReadSeconds(baseSeconds, aspect, busyness) {
 export function measureBusyness(img) {
   try {
     if (!img?.naturalWidth) return null
-    const w = 96
-    const h = clamp(Math.round((img.naturalHeight / img.naturalWidth) * w), 8, 384)
+    // 160px wide: fine enough that bubble lettering survives the downscale
+    // as detectable dark-on-bright strokes (96px blurred them into gray).
+    const w = 160
+    const h = clamp(Math.round((img.naturalHeight / img.naturalWidth) * w), 8, 640)
     const canvas = document.createElement('canvas')
     canvas.width = w
     canvas.height = h
@@ -88,11 +90,13 @@ export function measureBusyness(img) {
     const edgeRatio = edges / total // ≤ 0.35 by construction
     const inkRatio = ink / total
     const textRatio = textInk / total
-    // Text leads (it's what you actually read); edges/ink add general
-    // busyness. Weights are heuristic — tuned so a dialogue-heavy page
-    // approaches 1 while sparse art stays low — and best re-checked in the
-    // browser (this path is exercised by the reader smoke test).
-    return clamp(textRatio * 5.5 + edgeRatio * 3.2 + inkRatio * 0.25, 0, 1)
+    // Edges carry general density (they saturate on their own for a busy
+    // page); detected text is a BONUS on top so a dialogue page pushes past
+    // what art-only density would score. Weights are heuristic — tuned so a
+    // text-heavy page approaches 1 while sparse art stays low — and best
+    // re-checked in the browser (this path is exercised by the reader smoke
+    // test).
+    return clamp(edgeRatio * 4.5 + textRatio * 6 + inkRatio * 0.3, 0, 1)
   } catch {
     return null
   }
