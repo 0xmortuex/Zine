@@ -269,10 +269,24 @@ function Chapters({ manga }) {
 
   const volumes = useMemo(() => (byVolume ? groupByVolume(visible) : null), [byVolume, visible])
 
+  const language = languages[0]
   const languageOptions = useMemo(() => {
-    const available = manga.availableLanguages.length ? manga.availableLanguages : ['en']
-    return available.map((lang) => ({ value: lang, label: lang.toUpperCase() }))
-  }, [manga.availableLanguages])
+    const known = manga.availableLanguages.length > 0
+    const available = known ? manga.availableLanguages : ['en']
+    const options = available.map((lang) => ({ value: lang, label: lang.toUpperCase() }))
+    // The picker must show the language this list was actually loaded for.
+    // When the series has nothing in it, the browser used to display the
+    // first option instead — the list said "no chapters in this language"
+    // under a picker naming a different language, and with a single option
+    // there was no way to switch to it.
+    if (!available.includes(language)) {
+      options.unshift({
+        value: language,
+        label: known ? `${language.toUpperCase()} · none` : language.toUpperCase(),
+      })
+    }
+    return options
+  }, [manga.availableLanguages, language])
 
   const firstChapter = sortDesc ? visible[visible.length - 1] : visible[0]
 
@@ -292,10 +306,11 @@ function Chapters({ manga }) {
       {/* Toolbar */}
       <div className="mb-8 flex flex-wrap items-center gap-x-6 gap-y-3">
         <Select
-          value={languages[0]}
+          value={language}
           onChange={(lang) => setLanguages([lang])}
           options={languageOptions}
-          className="w-28"
+          // Room for the longer "PT-BR · none" label; the usual width otherwise.
+          className={languageOptions[0].label.includes('·') ? 'w-40' : 'w-28'}
         />
         <ToolbarToggle
           label={sortDesc ? 'Newest first' : 'Oldest first'}
