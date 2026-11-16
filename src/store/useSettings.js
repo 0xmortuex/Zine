@@ -1,6 +1,10 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { DEFAULT_THEME } from '../lib/themes'
+import { DEFAULT_THEME, THEMES } from '../lib/themes.js'
+import { mergeSettings } from './persistedState.js'
+import { guardedPersist } from './guardedPersist.js'
+
+const THEME_IDS = THEMES.map((theme) => theme.id)
 
 /**
  * User preferences, persisted to localStorage under 'zine-settings'.
@@ -54,6 +58,15 @@ export const useSettings = create(
       setReadableOnly: (readableOnly) => set({ readableOnly }),
       setApiProxy: (apiProxy) => set({ apiProxy }),
     }),
-    { name: 'zine-settings' },
+    // Saved settings are merged key by key over the defaults (see
+    // persistedState.js): a setting added after a visitor last saved gets
+    // its default instead of undefined, and an unusable value falls back to
+    // its default — announced, never silently.
+    guardedPersist(
+      'zine-settings',
+      'settings',
+      (persisted, current) => mergeSettings(persisted, current, THEME_IDS),
+      () => useSettings,
+    ),
   ),
 )

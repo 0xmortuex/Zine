@@ -1,7 +1,6 @@
 import { Link, NavLink, useLocation, useSearchParams } from 'react-router-dom'
 import { motion } from 'motion/react'
 import BackgroundLayer from './BackgroundLayer'
-import ToastStack from './Toast'
 import Icon from './ui/Icon'
 import clsx from 'clsx'
 import { USING_FIXTURES } from '../api'
@@ -55,8 +54,6 @@ export default function Layout({ children }) {
       </footer>
 
       {isMobile && <MobileNav />}
-
-      <ToastStack />
     </div>
   )
 }

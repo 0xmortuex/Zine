@@ -4,8 +4,11 @@ import MangaCard from './MangaCard'
 /**
  * Staggered results grid. Only the first rows get a stagger delay so huge
  * result sets don't crawl in.
+ *
+ * `layoutScope` names the grid when another grid on the same page can show
+ * the same title (see MangaCard).
  */
-export default function MangaGrid({ items }) {
+export default function MangaGrid({ items, layoutScope }) {
   return (
     <motion.ul
       initial="hidden"
@@ -20,7 +23,7 @@ export default function MangaGrid({ items }) {
           custom={index}
           variants={index < 15 ? undefined : { hidden: { opacity: 0 }, show: { opacity: 1 } }}
         >
-          <MangaCard manga={manga} />
+          <MangaCard manga={manga} layoutScope={layoutScope} />
         </motion.li>
       ))}
     </motion.ul>

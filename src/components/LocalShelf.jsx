@@ -113,7 +113,10 @@ export default function LocalShelf() {
         )}
       </AnimatePresence>
 
-      {entries?.length > 0 && <MangaGrid items={entries.map(normalizeLocalManga)} />}
+      {/* layoutScope: a favorited local series is also in the favorites grid below. */}
+      {entries?.length > 0 && (
+        <MangaGrid items={entries.map(normalizeLocalManga)} layoutScope="device" />
+      )}
 
       {entries?.length === 0 && !pending && (
         <p className="rounded-lg border border-dashed border-border px-4 py-6 text-center text-xs text-muted">

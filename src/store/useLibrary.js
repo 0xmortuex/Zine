@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { mergeLibrary } from './persistedState.js'
+import { guardedPersist } from './guardedPersist.js'
 
 const HISTORY_CAP = 50
 
@@ -43,6 +45,11 @@ export const useLibrary = create(
 
       markRead: (mangaId, chapterId, read = true) =>
         set((state) => {
+          // Already in the requested state: hand back the SAME state object so
+          // subscribers are not notified. A no-op write that looks like a
+          // change re-renders everything derived from readChapters — the
+          // reader's end-of-chapter effect looped on exactly that.
+          if (Boolean(state.readChapters[mangaId]?.[chapterId]) === read) return state
           const forManga = { ...(state.readChapters[mangaId] ?? {}) }
           if (read) forManga[chapterId] = true
           else delete forManga[chapterId]
@@ -61,6 +68,8 @@ export const useLibrary = create(
       clearProgress: () => set({ progress: {}, readChapters: {} }),
       clearFavorites: () => set({ favorites: {} }),
     }),
-    { name: 'zine-library' },
+    // Saved data is validated on the way in; anything unusable is dropped
+    // per entry and announced (see guardedPersist.js / persistedState.js).
+    guardedPersist('zine-library', 'library', mergeLibrary, () => useLibrary),
   ),
 )

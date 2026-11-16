@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from 'motion/react'
 import clsx from 'clsx'
 import Icon from '../ui/Icon'
+import PageFailure from './PageFailure'
 
 const FIT_CLASSES = {
   height: 'max-h-full w-auto object-contain',
@@ -41,10 +42,13 @@ export default function PagedView({
   onBack,
   onCenterTap,
   onImageError,
+  brokenUrls,
+  onRetry,
   isRtl,
   isMobile,
 }) {
   const offset = slideDirection * 48
+  const isBroken = (pageUrl) => Boolean(pageUrl) && Boolean(brokenUrls?.has(pageUrl))
 
   const tapZones = (
     <div
@@ -94,11 +98,24 @@ export default function PagedView({
             transition={SLIDE}
             className="flex h-full w-full items-center justify-center"
           >
-            <SpreadHalf url={leftUrl} alt={`Page ${page + (isRtl ? 2 : 1)}`} onImageError={onImageError} align="end" />
-            <SpreadHalf url={rightUrl} alt={`Page ${page + (isRtl ? 1 : 2)}`} onImageError={onImageError} align="start" />
+            <SpreadHalf url={leftUrl} alt={`Page ${page + (isRtl ? 2 : 1)}`} onImageError={onImageError} broken={isBroken(leftUrl)} align="end" />
+            <SpreadHalf url={rightUrl} alt={`Page ${page + (isRtl ? 1 : 2)}`} onImageError={onImageError} broken={isBroken(rightUrl)} align="start" />
           </motion.div>
         </AnimatePresence>
         {tapZones}
+        {/* Failure plates sit above the tap zones (so "Try again" is
+            clickable) but only the plate itself takes pointer events — the
+            zones around it still turn pages. */}
+        {(isBroken(leftUrl) || isBroken(rightUrl)) && (
+          <div className="pointer-events-none absolute inset-0 z-20 flex">
+            <div className="flex w-1/2 items-center justify-center">
+              {isBroken(leftUrl) && <PageFailure pageNumber={page + (isRtl ? 2 : 1)} onRetry={onRetry} />}
+            </div>
+            <div className="flex w-1/2 items-center justify-center">
+              {isBroken(rightUrl) && <PageFailure pageNumber={page + (isRtl ? 1 : 2)} onRetry={onRetry} />}
+            </div>
+          </div>
+        )}
       </div>
     )
   }
@@ -123,23 +140,29 @@ export default function PagedView({
           alt={`Page ${page + 1}`}
           referrerPolicy="no-referrer"
           draggable={false}
-          onError={onImageError}
+          onError={() => onImageError(url)}
           initial={{ opacity: 0, x: offset }}
           animate={{ opacity: 1, x: 0 }}
           exit={{ opacity: 0, x: -offset }}
           transition={SLIDE}
-          className={clsx('select-none', FIT_CLASSES[fit])}
+          // A failed image is hidden (no broken-image icon); PageFailure below takes its place.
+          className={clsx('select-none', FIT_CLASSES[fit], isBroken(url) && 'invisible')}
         />
       </AnimatePresence>
 
       {tapZones}
+      {isBroken(url) && (
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
+          <PageFailure pageNumber={page + 1} onRetry={onRetry} />
+        </div>
+      )}
     </div>
   )
 }
 
 /** One half of a two-page spread; an absent page leaves its half blank so the
  *  partner stays on its correct side (e.g. a lone final page hugs the spine). */
-function SpreadHalf({ url, alt, onImageError, align }) {
+function SpreadHalf({ url, alt, onImageError, broken, align }) {
   return (
     <div
       className={clsx(
@@ -153,8 +176,8 @@ function SpreadHalf({ url, alt, onImageError, align }) {
           alt={alt}
           referrerPolicy="no-referrer"
           draggable={false}
-          onError={onImageError}
-          className="max-h-full max-w-full object-contain select-none"
+          onError={() => onImageError(url)}
+          className={clsx('max-h-full max-w-full object-contain select-none', broken && 'invisible')}
         />
       )}
     </div>

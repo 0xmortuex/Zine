@@ -22,10 +22,16 @@ import { useOrientation } from '../hooks/useOrientation'
 import { createPreloader, isStale } from '../lib/preload'
 import { estimateReadSeconds } from '../lib/pageTiming'
 import { dedupeChapters, findPrevNext, formatChapterLabel } from '../lib/chapters'
+import { isAtStripEnd, isAtStripStart, stripStep } from '../lib/stripPosition'
 
 const CHROME_IDLE_MS = 4000
 const INTERSTITIAL_SECONDS = 3
 const EMPTY_READ = {}
+const NO_BROKEN_URLS = new Set()
+
+/** Keyboard/button steps through the strip glide, unless the user asked for less motion. */
+const scrollBehavior = () =>
+  window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
 
 export default function ReaderPage() {
   const { mangaId, chapterId } = useParams()
@@ -44,11 +50,13 @@ export default function ReaderPage() {
   const { chapters } = useChapters(mangaId)
   const [pageSet, setPageSet] = useState(null) // { urls, fetchedAt }
   const [pagesError, setPagesError] = useState(null)
+  const [brokenUrls, setBrokenUrls] = useState(NO_BROKEN_URLS) // page images that failed twice
   const [page, setPage] = useState(0)
   const [slideDirection, setSlideDirection] = useState(1)
   const [chromeVisible, setChromeVisible] = useState(true)
   const [sheetOpen, setSheetOpen] = useState(false)
   const [interstitial, setInterstitial] = useState(false)
+  const [verticalPlaying, setVerticalPlaying] = useState(false) // vertical-mode auto-scroll
 
   const shellRef = useRef(null)
   const verticalRef = useRef(null)
@@ -69,6 +77,7 @@ export default function ReaderPage() {
   const loadPages = useCallback(async () => {
     setPageSet(null)
     setPagesError(null)
+    setBrokenUrls(NO_BROKEN_URLS) // a new page list means new image URLs
     try {
       const urls = await getChapterPages(chapterId, { dataSaver: reader.dataSaver })
       setPageSet({ urls, fetchedAt: Date.now() })
@@ -123,29 +132,27 @@ export default function ReaderPage() {
   )
   const chapterLabel = current ? formatChapterLabel(current) : ''
 
-  /* ------------------------ progress + history ------------------------- */
+  /* ------------------------ progress + history -------------------------
+   * These effects key on chapterLabel (a string), never on `current`: that
+   * object is rebuilt whenever readChapters changes, so depending on it made
+   * markRead re-trigger its own effect without end on the last page. */
 
   useEffect(() => {
-    if (!pageCount || !current) return
-    setProgress(mangaId, {
-      chapterId,
-      chapterLabel: formatChapterLabel(current),
-      page,
-      totalPages: pageCount,
-    })
+    if (!pageCount || !chapterLabel) return
+    setProgress(mangaId, { chapterId, chapterLabel, page, totalPages: pageCount })
     if (page === pageCount - 1) markRead(mangaId, chapterId)
-  }, [page, pageCount, mangaId, chapterId, current, setProgress, markRead])
+  }, [page, pageCount, mangaId, chapterId, chapterLabel, setProgress, markRead])
 
   useEffect(() => {
-    if (!manga || !current) return
+    if (!manga || !chapterLabel) return
     pushHistory({
       mangaId,
       title: manga.title,
       coverThumbUrl: manga.coverThumbUrl,
       chapterId,
-      chapterLabel: formatChapterLabel(current),
+      chapterLabel,
     })
-  }, [manga, current, mangaId, chapterId, pushHistory])
+  }, [manga, chapterLabel, mangaId, chapterId, pushHistory])
 
   /* ------------------------------ navigation ----------------------------- */
 
@@ -156,13 +163,26 @@ export default function ReaderPage() {
     [navigate, mangaId],
   )
 
+  const isVertical = reader.mode === 'vertical'
+
   const goForward = useCallback(async () => {
     if (!pageCount) return false
     if (pageSet && isStale(pageSet.fetchedAt)) {
       await loadPages() // page URLs expired mid-read; refresh transparently
       return true
     }
-    if (page < pageCount - 1) {
+    if (isVertical) {
+      // The strip has no page turns: "forward" scrolls most of a screen and
+      // the page number follows from what is under the reading line. (It
+      // used to bump the page number without scrolling at all.)
+      const strip = verticalRef.current
+      if (!strip) return false
+      setVerticalPlaying(false)
+      if (!isAtStripEnd(strip.scrollTop, strip.clientHeight, strip.scrollHeight)) {
+        strip.scrollBy({ top: stripStep(strip.clientHeight), behavior: scrollBehavior() })
+        return true
+      }
+    } else if (page < pageCount - 1) {
       setSlideDirection(1)
       setPage((p) => Math.min(p + step, pageCount - 1))
       return true
@@ -172,16 +192,27 @@ export default function ReaderPage() {
       return true
     }
     return false
-  }, [page, pageCount, next, pageSet, loadPages, step])
+  }, [page, pageCount, next, pageSet, loadPages, step, isVertical])
 
   const goBack = useCallback(() => {
+    if (isVertical) {
+      const strip = verticalRef.current
+      if (!strip) return
+      setVerticalPlaying(false)
+      if (!isAtStripStart(strip.scrollTop)) {
+        strip.scrollBy({ top: -stripStep(strip.clientHeight), behavior: scrollBehavior() })
+      } else if (prev) {
+        goToChapter(prev)
+      }
+      return
+    }
     if (page > 0) {
       setSlideDirection(-1)
       setPage((p) => Math.max(p - step, 0))
     } else if (prev) {
       goToChapter(prev)
     }
-  }, [page, prev, goToChapter, step])
+  }, [page, prev, goToChapter, step, isVertical])
 
   /* ------------------------------- autoplay ------------------------------ */
 
@@ -205,8 +236,12 @@ export default function ReaderPage() {
 
   const effectiveSeconds = reader.smartTiming ? (smartSeconds ?? reader.autoplayInterval) : reader.autoplayInterval
 
+  // Autoplay holds on a page that failed to load rather than timing out
+  // and carrying the reader past a page they never saw.
+  const pageBroken =
+    brokenUrls.has(urls[page]) || (isSpread && brokenUrls.has(urls[page + 1]))
   const autoplayEnabled =
-    pageCount > 0 && !sheetOpen && !interstitial && reader.mode === 'paged'
+    pageCount > 0 && !sheetOpen && !interstitial && reader.mode === 'paged' && !pageBroken
 
   const handleAutoplayComplete = useCallback(async () => {
     if (page < pageCount - 1) {
@@ -231,7 +266,6 @@ export default function ReaderPage() {
 
   /* --------------------- vertical mode: auto-scroll ---------------------- */
 
-  const [verticalPlaying, setVerticalPlaying] = useState(false)
   const verticalListeners = useRef(new Set())
   const subscribeVertical = useCallback((listener) => {
     verticalListeners.current.add(listener)
@@ -366,27 +400,51 @@ export default function ReaderPage() {
   /* ------------------------------- keyboard ------------------------------ */
 
   const isRtl = reader.direction === 'rtl'
-  useKeyboard({
-    ArrowRight: () => (isRtl && reader.mode === 'paged' ? goBack() : goForward()),
-    ArrowLeft: () => (isRtl && reader.mode === 'paged' ? goForward() : goBack()),
-    ' ': toggleAutoplay,
-    f: toggleFullscreen,
-    F: toggleFullscreen,
-    m: () => setReader({ mode: reader.mode === 'paged' ? 'vertical' : 'paged' }),
-    z: () => setReader({ fit: reader.fit === 'cover' ? 'height' : 'cover' }),
-    Z: () => setReader({ fit: reader.fit === 'cover' ? 'height' : 'cover' }),
-    ',': () => setReader({ autoplayInterval: Math.max(1, reader.autoplayInterval - 1) }),
-    '.': () => setReader({ autoplayInterval: Math.min(60, reader.autoplayInterval + 1) }),
-    Escape: () => navigate(`/manga/${mangaId}`),
-  })
+  // Escape closes the topmost layer first — it only leaves the reader when
+  // nothing is open — and while a layer is open the reading shortcuts are
+  // inert, so arrow keys can't turn pages behind the settings sheet.
+  useKeyboard(
+    sheetOpen
+      ? { Escape: () => setSheetOpen(false) }
+      : interstitial
+        ? { Escape: () => setInterstitial(false) }
+        : {
+            ArrowRight: () => (isRtl && reader.mode === 'paged' ? goBack() : goForward()),
+            ArrowLeft: () => (isRtl && reader.mode === 'paged' ? goForward() : goBack()),
+            ' ': toggleAutoplay,
+            f: toggleFullscreen,
+            F: toggleFullscreen,
+            m: () => setReader({ mode: reader.mode === 'paged' ? 'vertical' : 'paged' }),
+            z: () => setReader({ fit: reader.fit === 'cover' ? 'height' : 'cover' }),
+            Z: () => setReader({ fit: reader.fit === 'cover' ? 'height' : 'cover' }),
+            ',': () => setReader({ autoplayInterval: Math.max(1, reader.autoplayInterval - 1) }),
+            '.': () => setReader({ autoplayInterval: Math.min(60, reader.autoplayInterval + 1) }),
+            Escape: () => navigate(`/manga/${mangaId}`),
+          },
+  )
 
   /* -------------------------------- render ------------------------------- */
 
-  const handleImageError = useCallback(() => {
-    if (!refetchedOnce.current) {
-      refetchedOnce.current = true
-      loadPages()
-    }
+  // A page image failed. The first failure of a chapter re-fetches the page
+  // list silently (URLs expire; MangaDex may hand out a different server).
+  // If an image fails again after that, say so on the page itself instead
+  // of leaving the browser's broken-image icon with no way forward.
+  const handleImageError = useCallback(
+    (url) => {
+      if (!refetchedOnce.current) {
+        refetchedOnce.current = true
+        loadPages()
+        return
+      }
+      setBrokenUrls((known) => (known.has(url) ? known : new Set(known).add(url)))
+    },
+    [loadPages],
+  )
+
+  /** "Try again" on a failed page: a fresh page list, and a fresh automatic retry. */
+  const retryPages = useCallback(() => {
+    refetchedOnce.current = false
+    loadPages()
   }, [loadPages])
 
   return (
@@ -435,6 +493,8 @@ export default function ReaderPage() {
               onBack={goBack}
               onCenterTap={handleCenterTap}
               onImageError={handleImageError}
+              brokenUrls={brokenUrls}
+              onRetry={retryPages}
               isRtl={isRtl}
               isMobile={isMobile}
             />
@@ -444,6 +504,9 @@ export default function ReaderPage() {
               urls={urls}
               onPageInView={setPage}
               onTap={handleCenterTap}
+              onImageError={handleImageError}
+              brokenUrls={brokenUrls}
+              onRetry={retryPages}
               initialPage={page}
             />
           )}
@@ -558,16 +621,19 @@ function NextChapterInterstitial({ active, next, onCancel, onGo }) {
 
   useEffect(() => {
     if (!active) return
-    setCount(INTERSTITIAL_SECONDS)
+    // The countdown lives in this closure, and the hand-off fires from the
+    // timer callback — never from inside a setCount updater. Updaters run
+    // during render, where calling the parent's setState/navigate is an
+    // illegal cross-component update (and runs twice under StrictMode).
+    let remaining = INTERSTITIAL_SECONDS
+    setCount(remaining)
     const interval = setInterval(() => {
-      setCount((c) => {
-        if (c <= 1) {
-          clearInterval(interval)
-          onGoRef.current()
-          return 0
-        }
-        return c - 1
-      })
+      remaining -= 1
+      setCount(remaining)
+      if (remaining <= 0) {
+        clearInterval(interval)
+        onGoRef.current()
+      }
     }, 1000)
     return () => clearInterval(interval)
   }, [active])

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import SegmentedControl from '../ui/SegmentedControl'
 import Slider from '../ui/Slider'
@@ -12,6 +13,19 @@ import { useSettings } from '../../store/useSettings'
 export default function ReaderSettingsSheet({ open, onClose }) {
   const reader = useSettings((s) => s.reader)
   const setReader = useSettings((s) => s.setReader)
+  const closeButton = useRef(null)
+
+  // A dialog takes focus when it opens and hands it back when it closes, so
+  // keyboard users land inside the sheet instead of behind its backdrop.
+  // (Escape-to-close is wired in ReaderPage with the other shortcuts.)
+  useEffect(() => {
+    if (!open) return
+    const opener = document.activeElement
+    closeButton.current?.focus()
+    return () => {
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus()
+    }
+  }, [open])
 
   return (
     <AnimatePresence>
@@ -33,11 +47,12 @@ export default function ReaderSettingsSheet({ open, onClose }) {
             transition={{ type: 'spring', stiffness: 400, damping: 40 }}
             className="frosted fixed inset-x-0 bottom-0 z-50 mx-auto max-w-lg rounded-t-2xl border border-b-0 border-border bg-surface p-6 pb-8"
             role="dialog"
+            aria-modal="true"
             aria-label="Reader settings"
           >
             <div className="mb-5 flex items-center justify-between">
               <p className="text-display text-lg lowercase">reader settings.</p>
-              <IconButton icon="close" label="Close" onClick={onClose} />
+              <IconButton ref={closeButton} icon="close" label="Close" onClick={onClose} />
             </div>
 
             <div className="space-y-5">
