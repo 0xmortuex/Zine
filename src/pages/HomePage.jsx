@@ -78,10 +78,10 @@ export default function HomePage() {
 /* --------------------------------- search -------------------------------- */
 
 function SearchTab() {
-  const { query, items, loading, loadingMore, error, search, loadMore, hasMore } =
+  const { query, items, loading, loadingMore, error, search, loadMore, hasMore, clear } =
     useMangaSearch()
   const [input, setInput] = useState('')
-  const [params] = useSearchParams()
+  const [params, setParams] = useSearchParams()
   const navigate = useNavigate()
 
   // Type-ahead suggestions with keyboard navigation.
@@ -91,12 +91,21 @@ function SearchTab() {
   useEffect(() => setActiveIndex(-1), [suggestions])
   const showSuggestions = suggestOpen && suggestions.length > 0 && input.trim().length >= 2
 
-  // ?q= deep links (e.g. a MAL rail card handing off to a title search).
-  const linkedQuery = params.get('q')
+  // The address bar owns the current search. ?q= runs it — a submitted
+  // search, a MAL rail card handing off, Back from a series page, a shared
+  // link — and its absence means the discovery rails. Without this a search
+  // lived only in component state: opening a result and pressing Back
+  // returned to an empty page.
+  const linkedQuery = params.get('q')?.trim() || null
   useEffect(() => {
-    if (linkedQuery && linkedQuery !== query) {
-      setInput(linkedQuery)
-      search(linkedQuery)
+    if (linkedQuery) {
+      if (linkedQuery !== query) {
+        setInput(linkedQuery)
+        search(linkedQuery)
+      }
+    } else if (query) {
+      clear()
+      setInput('')
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [linkedQuery])
@@ -104,7 +113,11 @@ function SearchTab() {
   function handleSubmit(event) {
     event.preventDefault()
     setSuggestOpen(false)
-    search(input)
+    const q = input.trim()
+    if (!q) return
+    if (loading && q === query) return // this exact search is already running
+    search(q)
+    if (q !== linkedQuery) setParams({ q })
   }
 
   function pickSuggestion(manga) {
@@ -201,8 +214,12 @@ function SearchTab() {
             </ul>
           )}
         </div>
-        <Button type="submit" variant="primary" disabled={loading}>
-          {loading ? 'Searching…' : 'Search'}
+        {/* Never disabled: a disabled submit button also blocks Enter in the
+            field, and one slow or dead source used to lock the whole form
+            for seconds after results were already on screen. A new search
+            simply supersedes the running one. */}
+        <Button type="submit" variant="primary">
+          {loading && !items ? 'Searching…' : 'Search'}
         </Button>
       </form>
 

@@ -92,9 +92,21 @@ export function useMangaSearch() {
     }
   }, [query, loadingMore, contentRatings, availableLanguages])
 
+  /** Back to the pre-search state; anything still in flight is dropped. */
+  const clear = useCallback(() => {
+    requestId.current++
+    seenTitles.current = new Set()
+    mangadexPaging.current = { count: 0, total: 0 }
+    setQuery('')
+    setItems(null)
+    setError(null)
+    setLoading(false)
+    setLoadingMore(false)
+  }, [])
+
   const hasMore = Boolean(
     items && mangadexPaging.current.count < mangadexPaging.current.total,
   )
 
-  return { query, items, loading, loadingMore, error, search, loadMore, hasMore }
+  return { query, items, loading, loadingMore, error, search, loadMore, hasMore, clear }
 }
