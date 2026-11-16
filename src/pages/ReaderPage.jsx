@@ -123,29 +123,27 @@ export default function ReaderPage() {
   )
   const chapterLabel = current ? formatChapterLabel(current) : ''
 
-  /* ------------------------ progress + history ------------------------- */
+  /* ------------------------ progress + history -------------------------
+   * These effects key on chapterLabel (a string), never on `current`: that
+   * object is rebuilt whenever readChapters changes, so depending on it made
+   * markRead re-trigger its own effect without end on the last page. */
 
   useEffect(() => {
-    if (!pageCount || !current) return
-    setProgress(mangaId, {
-      chapterId,
-      chapterLabel: formatChapterLabel(current),
-      page,
-      totalPages: pageCount,
-    })
+    if (!pageCount || !chapterLabel) return
+    setProgress(mangaId, { chapterId, chapterLabel, page, totalPages: pageCount })
     if (page === pageCount - 1) markRead(mangaId, chapterId)
-  }, [page, pageCount, mangaId, chapterId, current, setProgress, markRead])
+  }, [page, pageCount, mangaId, chapterId, chapterLabel, setProgress, markRead])
 
   useEffect(() => {
-    if (!manga || !current) return
+    if (!manga || !chapterLabel) return
     pushHistory({
       mangaId,
       title: manga.title,
       coverThumbUrl: manga.coverThumbUrl,
       chapterId,
-      chapterLabel: formatChapterLabel(current),
+      chapterLabel,
     })
-  }, [manga, current, mangaId, chapterId, pushHistory])
+  }, [manga, chapterLabel, mangaId, chapterId, pushHistory])
 
   /* ------------------------------ navigation ----------------------------- */
 
@@ -558,16 +556,19 @@ function NextChapterInterstitial({ active, next, onCancel, onGo }) {
 
   useEffect(() => {
     if (!active) return
-    setCount(INTERSTITIAL_SECONDS)
+    // The countdown lives in this closure, and the hand-off fires from the
+    // timer callback — never from inside a setCount updater. Updaters run
+    // during render, where calling the parent's setState/navigate is an
+    // illegal cross-component update (and runs twice under StrictMode).
+    let remaining = INTERSTITIAL_SECONDS
+    setCount(remaining)
     const interval = setInterval(() => {
-      setCount((c) => {
-        if (c <= 1) {
-          clearInterval(interval)
-          onGoRef.current()
-          return 0
-        }
-        return c - 1
-      })
+      remaining -= 1
+      setCount(remaining)
+      if (remaining <= 0) {
+        clearInterval(interval)
+        onGoRef.current()
+      }
     }, 1000)
     return () => clearInterval(interval)
   }, [active])

@@ -43,6 +43,11 @@ export const useLibrary = create(
 
       markRead: (mangaId, chapterId, read = true) =>
         set((state) => {
+          // Already in the requested state: hand back the SAME state object so
+          // subscribers are not notified. A no-op write that looks like a
+          // change re-renders everything derived from readChapters — the
+          // reader's end-of-chapter effect looped on exactly that.
+          if (Boolean(state.readChapters[mangaId]?.[chapterId]) === read) return state
           const forManga = { ...(state.readChapters[mangaId] ?? {}) }
           if (read) forManga[chapterId] = true
           else delete forManga[chapterId]
