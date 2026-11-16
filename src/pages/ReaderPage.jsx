@@ -364,19 +364,28 @@ export default function ReaderPage() {
   /* ------------------------------- keyboard ------------------------------ */
 
   const isRtl = reader.direction === 'rtl'
-  useKeyboard({
-    ArrowRight: () => (isRtl && reader.mode === 'paged' ? goBack() : goForward()),
-    ArrowLeft: () => (isRtl && reader.mode === 'paged' ? goForward() : goBack()),
-    ' ': toggleAutoplay,
-    f: toggleFullscreen,
-    F: toggleFullscreen,
-    m: () => setReader({ mode: reader.mode === 'paged' ? 'vertical' : 'paged' }),
-    z: () => setReader({ fit: reader.fit === 'cover' ? 'height' : 'cover' }),
-    Z: () => setReader({ fit: reader.fit === 'cover' ? 'height' : 'cover' }),
-    ',': () => setReader({ autoplayInterval: Math.max(1, reader.autoplayInterval - 1) }),
-    '.': () => setReader({ autoplayInterval: Math.min(60, reader.autoplayInterval + 1) }),
-    Escape: () => navigate(`/manga/${mangaId}`),
-  })
+  // Escape closes the topmost layer first — it only leaves the reader when
+  // nothing is open — and while a layer is open the reading shortcuts are
+  // inert, so arrow keys can't turn pages behind the settings sheet.
+  useKeyboard(
+    sheetOpen
+      ? { Escape: () => setSheetOpen(false) }
+      : interstitial
+        ? { Escape: () => setInterstitial(false) }
+        : {
+            ArrowRight: () => (isRtl && reader.mode === 'paged' ? goBack() : goForward()),
+            ArrowLeft: () => (isRtl && reader.mode === 'paged' ? goForward() : goBack()),
+            ' ': toggleAutoplay,
+            f: toggleFullscreen,
+            F: toggleFullscreen,
+            m: () => setReader({ mode: reader.mode === 'paged' ? 'vertical' : 'paged' }),
+            z: () => setReader({ fit: reader.fit === 'cover' ? 'height' : 'cover' }),
+            Z: () => setReader({ fit: reader.fit === 'cover' ? 'height' : 'cover' }),
+            ',': () => setReader({ autoplayInterval: Math.max(1, reader.autoplayInterval - 1) }),
+            '.': () => setReader({ autoplayInterval: Math.min(60, reader.autoplayInterval + 1) }),
+            Escape: () => navigate(`/manga/${mangaId}`),
+          },
+  )
 
   /* -------------------------------- render ------------------------------- */
 
