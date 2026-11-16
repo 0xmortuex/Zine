@@ -288,8 +288,8 @@ function DiscoverRails() {
 
   return (
     <>
-      <DiscoverSection title="trending now." items={trending} />
-      <DiscoverSection title="most popular." items={popular} />
+      <DiscoverSection title="trending now." items={trending} layoutScope="trending" />
+      <DiscoverSection title="most popular." items={popular} layoutScope="popular" />
       {failed && (
         <EmptyState
           icon="book"
@@ -301,7 +301,7 @@ function DiscoverRails() {
   )
 }
 
-function DiscoverSection({ title, items }) {
+function DiscoverSection({ title, items, layoutScope }) {
   if (items?.length === 0) return null
   return (
     <section className="mb-12">
@@ -309,7 +309,11 @@ function DiscoverSection({ title, items }) {
         <h3 className="text-display text-lg lowercase">{title}</h3>
         <div className="rule-h flex-1 self-center" />
       </div>
-      {items === null ? <SkeletonGrid count={6} /> : <MangaGrid items={items} />}
+      {items === null ? (
+        <SkeletonGrid count={6} />
+      ) : (
+        <MangaGrid items={items} layoutScope={layoutScope} />
+      )}
     </section>
   )
 }

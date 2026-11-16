@@ -8,7 +8,7 @@ import Icon from './ui/Icon'
  * hover, title as the lead element, status as a print stamp, reading
  * progress as a hairline bar.
  */
-export default function MangaCard({ manga }) {
+export default function MangaCard({ manga, layoutScope }) {
   const isFavorite = useLibrary((s) => Boolean(s.favorites[manga.id]))
   const progress = useLibrary((s) => s.progress[manga.id])
 
@@ -37,7 +37,11 @@ export default function MangaCard({ manga }) {
         >
           <span className="ink-plate rounded-lg" />
           <motion.div
-            layoutId={`cover-${manga.id}`}
+            // A layoutId must be unique among mounted elements: when two
+            // share one, motion shows only the newest and hides the rest.
+            // The same title in both discovery rails left the first rail's
+            // cover blank, so grids that can overlap pass a layoutScope.
+            layoutId={layoutScope ? `cover-${layoutScope}-${manga.id}` : `cover-${manga.id}`}
             className="relative aspect-[2/3] overflow-hidden rounded-lg border border-border bg-surface-raised"
           >
             {manga.coverThumbUrl ? (
