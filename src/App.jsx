@@ -2,6 +2,7 @@ import { Route, Routes, useLocation } from 'react-router-dom'
 import { AnimatePresence, MotionConfig } from 'motion/react'
 import { useEffect } from 'react'
 import Layout from './components/Layout'
+import ToastStack from './components/Toast'
 import HomePage from './pages/HomePage'
 import MangaPage from './pages/MangaPage'
 import ReaderPage from './pages/ReaderPage'
@@ -41,6 +42,10 @@ export default function App() {
           </AnimatePresence>
         </Layout>
       )}
+      {/* One stack for every route, the reader included: a notice raised
+          while the app boots (e.g. saved data that had to be repaired) must
+          be visible whichever page the visitor landed on. */}
+      <ToastStack />
     </MotionConfig>
   )
 }

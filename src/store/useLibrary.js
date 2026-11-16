@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { mergeLibrary } from './persistedState.js'
+import { guardedPersist } from './guardedPersist.js'
 
 const HISTORY_CAP = 50
 
@@ -66,6 +68,8 @@ export const useLibrary = create(
       clearProgress: () => set({ progress: {}, readChapters: {} }),
       clearFavorites: () => set({ favorites: {} }),
     }),
-    { name: 'zine-library' },
+    // Saved data is validated on the way in; anything unusable is dropped
+    // per entry and announced (see guardedPersist.js / persistedState.js).
+    guardedPersist('zine-library', 'library', mergeLibrary, () => useLibrary),
   ),
 )
