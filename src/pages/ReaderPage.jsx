@@ -22,10 +22,15 @@ import { useOrientation } from '../hooks/useOrientation'
 import { createPreloader, isStale } from '../lib/preload'
 import { estimateReadSeconds } from '../lib/pageTiming'
 import { dedupeChapters, findPrevNext, formatChapterLabel } from '../lib/chapters'
+import { isAtStripEnd, isAtStripStart, stripStep } from '../lib/stripPosition'
 
 const CHROME_IDLE_MS = 4000
 const INTERSTITIAL_SECONDS = 3
 const EMPTY_READ = {}
+
+/** Keyboard/button steps through the strip glide, unless the user asked for less motion. */
+const scrollBehavior = () =>
+  window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
 
 export default function ReaderPage() {
   const { mangaId, chapterId } = useParams()
@@ -49,6 +54,7 @@ export default function ReaderPage() {
   const [chromeVisible, setChromeVisible] = useState(true)
   const [sheetOpen, setSheetOpen] = useState(false)
   const [interstitial, setInterstitial] = useState(false)
+  const [verticalPlaying, setVerticalPlaying] = useState(false) // vertical-mode auto-scroll
 
   const shellRef = useRef(null)
   const verticalRef = useRef(null)
@@ -154,13 +160,26 @@ export default function ReaderPage() {
     [navigate, mangaId],
   )
 
+  const isVertical = reader.mode === 'vertical'
+
   const goForward = useCallback(async () => {
     if (!pageCount) return false
     if (pageSet && isStale(pageSet.fetchedAt)) {
       await loadPages() // page URLs expired mid-read; refresh transparently
       return true
     }
-    if (page < pageCount - 1) {
+    if (isVertical) {
+      // The strip has no page turns: "forward" scrolls most of a screen and
+      // the page number follows from what is under the reading line. (It
+      // used to bump the page number without scrolling at all.)
+      const strip = verticalRef.current
+      if (!strip) return false
+      setVerticalPlaying(false)
+      if (!isAtStripEnd(strip.scrollTop, strip.clientHeight, strip.scrollHeight)) {
+        strip.scrollBy({ top: stripStep(strip.clientHeight), behavior: scrollBehavior() })
+        return true
+      }
+    } else if (page < pageCount - 1) {
       setSlideDirection(1)
       setPage((p) => Math.min(p + step, pageCount - 1))
       return true
@@ -170,16 +189,27 @@ export default function ReaderPage() {
       return true
     }
     return false
-  }, [page, pageCount, next, pageSet, loadPages, step])
+  }, [page, pageCount, next, pageSet, loadPages, step, isVertical])
 
   const goBack = useCallback(() => {
+    if (isVertical) {
+      const strip = verticalRef.current
+      if (!strip) return
+      setVerticalPlaying(false)
+      if (!isAtStripStart(strip.scrollTop)) {
+        strip.scrollBy({ top: -stripStep(strip.clientHeight), behavior: scrollBehavior() })
+      } else if (prev) {
+        goToChapter(prev)
+      }
+      return
+    }
     if (page > 0) {
       setSlideDirection(-1)
       setPage((p) => Math.max(p - step, 0))
     } else if (prev) {
       goToChapter(prev)
     }
-  }, [page, prev, goToChapter, step])
+  }, [page, prev, goToChapter, step, isVertical])
 
   /* ------------------------------- autoplay ------------------------------ */
 
@@ -229,7 +259,6 @@ export default function ReaderPage() {
 
   /* --------------------- vertical mode: auto-scroll ---------------------- */
 
-  const [verticalPlaying, setVerticalPlaying] = useState(false)
   const verticalListeners = useRef(new Set())
   const subscribeVertical = useCallback((listener) => {
     verticalListeners.current.add(listener)

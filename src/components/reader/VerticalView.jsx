@@ -1,15 +1,20 @@
-import { forwardRef, useEffect, useRef } from 'react'
+import { forwardRef, useCallback, useEffect, useRef } from 'react'
+import { pageAtReadingLine } from '../../lib/stripPosition'
 
 /**
  * Webtoon strip mode: continuous vertical scroll. Pages lazy-load via
  * loading="lazy" with aspect-ratio placeholder boxes to avoid scroll jank.
- * Reports the page currently in view via IntersectionObserver.
+ * Reports the page under the reading line (the middle of the viewport) as
+ * the strip scrolls — see lib/stripPosition.js for why it is a line and not
+ * a visible-fraction threshold.
  */
 const VerticalView = forwardRef(function VerticalView(
   { urls, onPageInView, onTap, initialPage = 0 },
   containerRef,
 ) {
   const pageRefs = useRef([])
+  const frame = useRef(0)
+  const reported = useRef(-1)
 
   // Jump to the resume position once per chapter mount.
   useEffect(() => {
@@ -19,30 +24,55 @@ const VerticalView = forwardRef(function VerticalView(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urls])
 
+  const report = useCallback(() => {
+    frame.current = 0
+    const root = containerRef?.current
+    if (!root) return
+    const tops = []
+    for (let i = 0; i < urls.length; i++) tops.push(pageRefs.current[i]?.offsetTop ?? 0)
+    const index = pageAtReadingLine(tops, root.scrollTop, root.clientHeight, root.scrollHeight)
+    if (index !== reported.current) {
+      reported.current = index
+      onPageInView(index)
+    }
+  }, [urls, onPageInView, containerRef])
+
+  /** Coalesce bursts of scroll/load/resize events into one measurement per frame. */
+  const schedule = useCallback(() => {
+    if (!frame.current) frame.current = requestAnimationFrame(report)
+  }, [report])
+
   useEffect(() => {
     const root = containerRef?.current
     if (!root) return
-    const observer = new IntersectionObserver(
-      (observations) => {
-        for (const entry of observations) {
-          if (entry.isIntersecting) {
-            onPageInView(Number(entry.target.dataset.page))
-          }
-        }
-      },
-      { root, threshold: 0.5 },
-    )
-    for (const el of pageRefs.current) {
-      if (el) observer.observe(el)
+    reported.current = -1
+    schedule() // settle on the resume position
+    root.addEventListener('scroll', schedule, { passive: true })
+    window.addEventListener('resize', schedule)
+    return () => {
+      root.removeEventListener('scroll', schedule)
+      window.removeEventListener('resize', schedule)
+      cancelAnimationFrame(frame.current)
+      frame.current = 0
     }
-    return () => observer.disconnect()
-  }, [urls, onPageInView, containerRef])
+  }, [schedule, containerRef])
+
+  // Take keyboard focus when nothing else has it, so ↑ ↓ PageUp PageDown
+  // Home End scroll the strip natively the moment a chapter opens.
+  useEffect(() => {
+    if (document.activeElement === document.body) {
+      containerRef?.current?.focus({ preventScroll: true })
+    }
+  }, [containerRef])
 
   return (
     <div
       ref={containerRef}
       onClick={onTap}
-      className="no-scrollbar h-full w-full overflow-y-auto"
+      tabIndex={-1}
+      // relative: makes this the offsetParent, so each page's offsetTop is
+      // its position within the scrolled content.
+      className="no-scrollbar relative h-full w-full overflow-y-auto outline-none"
     >
       <div className="mx-auto flex max-w-3xl flex-col">
         {urls.map((url, index) => (
@@ -59,6 +89,9 @@ const VerticalView = forwardRef(function VerticalView(
               referrerPolicy="no-referrer"
               loading="lazy"
               draggable={false}
+              // A loaded image replaces its placeholder box with the real
+              // height, which moves every page below it.
+              onLoad={schedule}
               className="h-full w-full object-contain select-none"
             />
           </div>
