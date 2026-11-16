@@ -54,7 +54,8 @@ await page.click('button:has-text("Search")')
 await page.waitForSelector('text=/showing/', { timeout: 5000 })
 const cards = await page.locator('main ul a[href*="/manga/"]').count()
 console.log('search results rendered:', cards)
-if (!page.url().endsWith('/?q=a')) fail(`search query not in the address bar: ${page.url()}`)
+// (under a base path the router writes this as /Zine?q=a, at the root as /?q=a)
+if (new URL(page.url()).searchParams.get('q') !== 'a') fail(`search query not in the address bar: ${page.url()}`)
 await page.screenshot({ path: `${SHOTS}/1-home-search.png` })
 
 // open a result, come Back: the results must still be there
