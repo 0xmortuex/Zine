@@ -27,6 +27,7 @@ import { isAtStripEnd, isAtStripStart, stripStep } from '../lib/stripPosition'
 const CHROME_IDLE_MS = 4000
 const INTERSTITIAL_SECONDS = 3
 const EMPTY_READ = {}
+const NO_BROKEN_URLS = new Set()
 
 /** Keyboard/button steps through the strip glide, unless the user asked for less motion. */
 const scrollBehavior = () =>
@@ -49,6 +50,7 @@ export default function ReaderPage() {
   const { chapters } = useChapters(mangaId)
   const [pageSet, setPageSet] = useState(null) // { urls, fetchedAt }
   const [pagesError, setPagesError] = useState(null)
+  const [brokenUrls, setBrokenUrls] = useState(NO_BROKEN_URLS) // page images that failed twice
   const [page, setPage] = useState(0)
   const [slideDirection, setSlideDirection] = useState(1)
   const [chromeVisible, setChromeVisible] = useState(true)
@@ -75,6 +77,7 @@ export default function ReaderPage() {
   const loadPages = useCallback(async () => {
     setPageSet(null)
     setPagesError(null)
+    setBrokenUrls(NO_BROKEN_URLS) // a new page list means new image URLs
     try {
       const urls = await getChapterPages(chapterId, { dataSaver: reader.dataSaver })
       setPageSet({ urls, fetchedAt: Date.now() })
@@ -233,8 +236,12 @@ export default function ReaderPage() {
 
   const effectiveSeconds = reader.smartTiming ? (smartSeconds ?? reader.autoplayInterval) : reader.autoplayInterval
 
+  // Autoplay holds on a page that failed to load rather than timing out
+  // and carrying the reader past a page they never saw.
+  const pageBroken =
+    brokenUrls.has(urls[page]) || (isSpread && brokenUrls.has(urls[page + 1]))
   const autoplayEnabled =
-    pageCount > 0 && !sheetOpen && !interstitial && reader.mode === 'paged'
+    pageCount > 0 && !sheetOpen && !interstitial && reader.mode === 'paged' && !pageBroken
 
   const handleAutoplayComplete = useCallback(async () => {
     if (page < pageCount - 1) {
@@ -418,11 +425,26 @@ export default function ReaderPage() {
 
   /* -------------------------------- render ------------------------------- */
 
-  const handleImageError = useCallback(() => {
-    if (!refetchedOnce.current) {
-      refetchedOnce.current = true
-      loadPages()
-    }
+  // A page image failed. The first failure of a chapter re-fetches the page
+  // list silently (URLs expire; MangaDex may hand out a different server).
+  // If an image fails again after that, say so on the page itself instead
+  // of leaving the browser's broken-image icon with no way forward.
+  const handleImageError = useCallback(
+    (url) => {
+      if (!refetchedOnce.current) {
+        refetchedOnce.current = true
+        loadPages()
+        return
+      }
+      setBrokenUrls((known) => (known.has(url) ? known : new Set(known).add(url)))
+    },
+    [loadPages],
+  )
+
+  /** "Try again" on a failed page: a fresh page list, and a fresh automatic retry. */
+  const retryPages = useCallback(() => {
+    refetchedOnce.current = false
+    loadPages()
   }, [loadPages])
 
   return (
@@ -471,6 +493,8 @@ export default function ReaderPage() {
               onBack={goBack}
               onCenterTap={handleCenterTap}
               onImageError={handleImageError}
+              brokenUrls={brokenUrls}
+              onRetry={retryPages}
               isRtl={isRtl}
               isMobile={isMobile}
             />
@@ -480,6 +504,9 @@ export default function ReaderPage() {
               urls={urls}
               onPageInView={setPage}
               onTap={handleCenterTap}
+              onImageError={handleImageError}
+              brokenUrls={brokenUrls}
+              onRetry={retryPages}
               initialPage={page}
             />
           )}

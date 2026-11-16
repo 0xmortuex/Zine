@@ -1,5 +1,6 @@
 import { forwardRef, useCallback, useEffect, useRef } from 'react'
 import { pageAtReadingLine } from '../../lib/stripPosition'
+import PageFailure from './PageFailure'
 
 /**
  * Webtoon strip mode: continuous vertical scroll. Pages lazy-load via
@@ -9,7 +10,7 @@ import { pageAtReadingLine } from '../../lib/stripPosition'
  * a visible-fraction threshold.
  */
 const VerticalView = forwardRef(function VerticalView(
-  { urls, onPageInView, onTap, initialPage = 0 },
+  { urls, onPageInView, onTap, onImageError, brokenUrls, onRetry, initialPage = 0 },
   containerRef,
 ) {
   const pageRefs = useRef([])
@@ -83,17 +84,24 @@ const VerticalView = forwardRef(function VerticalView(
             className="w-full"
             style={{ aspectRatio: '2 / 3' }}
           >
-            <img
-              src={url}
-              alt={`Page ${index + 1}`}
-              referrerPolicy="no-referrer"
-              loading="lazy"
-              draggable={false}
-              // A loaded image replaces its placeholder box with the real
-              // height, which moves every page below it.
-              onLoad={schedule}
-              className="h-full w-full object-contain select-none"
-            />
+            {brokenUrls?.has(url) ? (
+              <div className="flex h-full w-full items-center justify-center">
+                <PageFailure pageNumber={index + 1} onRetry={onRetry} />
+              </div>
+            ) : (
+              <img
+                src={url}
+                alt={`Page ${index + 1}`}
+                referrerPolicy="no-referrer"
+                loading="lazy"
+                draggable={false}
+                // A loaded image replaces its placeholder box with the real
+                // height, which moves every page below it.
+                onLoad={schedule}
+                onError={() => onImageError?.(url)}
+                className="h-full w-full object-contain select-none"
+              />
+            )}
           </div>
         ))}
       </div>
