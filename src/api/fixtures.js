@@ -18,6 +18,10 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const uri = (svg) => `data:image/svg+xml,${encodeURIComponent(svg)}`
 
+/* Titles go into SVG <text>: a raw "&" ("Salt & Circuit") is invalid XML
+ * and the whole cover rendered as a broken image. */
+const xml = (text) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
 /* Deterministic pseudo-random per seed so covers are stable across reloads. */
 const rand = (seed) => {
   const x = Math.sin(seed * 127.1 + 311.7) * 43758.5453
@@ -51,8 +55,8 @@ function fixtureCover(index, title) {
     return `<line x1="0" y1="${y}" x2="${140 + rand(index + s + 9) * 160}" y2="${y}" stroke="${ink}" stroke-width="${1 + (s % 3)}" opacity="${0.25 + (s % 3) * 0.12}"/>`
   }).join('')
   const words = title.split(' ')
-  const line1 = words.slice(0, Math.ceil(words.length / 2)).join(' ')
-  const line2 = words.slice(Math.ceil(words.length / 2)).join(' ')
+  const line1 = xml(words.slice(0, Math.ceil(words.length / 2)).join(' '))
+  const line2 = xml(words.slice(Math.ceil(words.length / 2)).join(' '))
 
   return uri(`<svg xmlns="http://www.w3.org/2000/svg" width="400" height="600" viewBox="0 0 400 600">
   <defs>
